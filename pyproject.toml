@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timee-desktop"
+version = "0.1.0"
+description = "A local-first focus timer, break guide, and weekly planner for Linux"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PySide6>=6.8,<7"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Scheduling",
+]
+
+[project.gui-scripts]
+timee = "mola.app:main"
+
+[tool.setuptools]
+packages = ["mola"]

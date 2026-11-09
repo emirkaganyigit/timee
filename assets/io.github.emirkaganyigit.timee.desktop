@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Timee
+GenericName=Focus timer and wellness planner
+GenericName[tr]=Odak sayacı ve sağlıklı mola planlayıcısı
+Comment=Track focused work, take healthier breaks, and plan your week
+Comment[tr]=Odaklanma süreni takip et, sağlıklı molalar ver ve haftanı planla
+Exec=@LAUNCHER@
+Icon=io.github.emirkaganyigit.timee
+Terminal=false
+Categories=Utility;Clock;
+Keywords=timee;timer;stopwatch;focus;break;pomodoro;planner;kronometre;
+StartupNotify=true
+StartupWMClass=timee
