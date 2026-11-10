@@ -8,9 +8,10 @@ On Linux the default clock is CLOCK_BOOTTIME, which includes system suspend;
 other platforms fall back to monotonic time without a suspend guarantee.
 
 When a reminder becomes due, another reminder due within three minutes joins
-the same break. Completion takes precedence over reminders, but does not imply
-that a rest was taken: an overdue reminder opens on the next active tick after
-restarting. Completing or skipping an exercise resets the relevant cadence.
+the same break. Completion takes precedence over reminders. Reminder cadence is
+scoped to the current work period: five continuous non-working minutes reset
+both reminder clocks without changing work totals. Short targeted exercises
+reset only their own cadence.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Callable
 EPSILON = 1e-7
 MAX_TICK_GAP = 5.0
 COALESCE_WINDOW = 180.0
+REST_RESET_SECONDS = 5 * 60.0
 
 
 def default_clock() -> float:
@@ -51,12 +53,28 @@ def _number(value: object, fallback: float, low: float = 0.0,
         return fallback
 
 
+def _nonnegative_number(value: object, fallback: float, high: float) -> float:
+    """Accept a finite non-negative value without clamping invalid negatives."""
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        result = float(value)
+        if not math.isfinite(result) or result < 0:
+            raise ValueError
+        return min(high, result)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+
+
 class Engine:
     def __init__(self, clock: Callable[[], float] = default_clock,
-                 today: Callable[[], date] | None = None):
+                 today: Callable[[], date] | None = None,
+                 wall_clock: Callable[[], float] = time.time):
         self._clock = clock
         self._today = today or date.today
+        self._wall_clock = wall_clock
         self._last = float(clock())
+        self._rest_started_at: float | None = None
         self._day = self._today_key()
         self._events: list[str] = []
         self._resume_after_break = False
@@ -108,9 +126,28 @@ class Engine:
         self.since_eye = _number(self.since_eye, 0) if self.eye_enabled else 0.0
         self.since_movement = _number(self.since_movement, 0) if self.movement_enabled else 0.0
 
+    def _start_rest(self, started_at: float | None = None) -> None:
+        """Start one continuous non-working period without restarting it."""
+        if self._rest_started_at is None:
+            self._rest_started_at = self._last if started_at is None else float(started_at)
+
+    def _rest_elapsed(self) -> float:
+        if self._rest_started_at is None:
+            return 0.0
+        return max(0.0, self._last - self._rest_started_at)
+
+    def _reset_reminder_cadence(self) -> None:
+        self.since_eye = 0.0
+        self.since_movement = 0.0
+
+    def _apply_long_rest(self) -> None:
+        if self._rest_elapsed() + EPSILON >= REST_RESET_SECONDS:
+            self._reset_reminder_cadence()
+
     def _advance(self) -> None:
         now = float(self._clock())
-        delta = max(0.0, now - self._last)
+        previous = self._last
+        delta = max(0.0, now - previous)
         self._last = now
         self._sanitize()
         day = self._today_key()
@@ -120,9 +157,12 @@ class Engine:
             self.break_count = 0
             self._events.append("day_changed")
         if self.state != "running":
+            self._apply_long_rest()
             return
         if delta > MAX_TICK_GAP:
+            self._start_rest(previous)
             self.state = "paused"
+            self._apply_long_rest()
             self._events.append("suspended")
             return
 
@@ -151,6 +191,7 @@ class Engine:
         goal_done = self.goal_enabled and self.remaining_goal <= EPSILON
         timer_done = self.mode == "timer" and self.timer_remaining <= EPSILON
         if goal_done or timer_done:
+            self._start_rest()
             self.state = "paused"
             if goal_done:
                 self._events.append("goal_done")
@@ -184,11 +225,13 @@ class Engine:
         if self.mode == "timer" and self.timer_remaining <= EPSILON:
             self.timer_remaining = self.timer_duration
         self.state = "running"
+        self._rest_started_at = None
         return True
 
     def pause(self) -> None:
         self._advance()
         if self.state == "running":
+            self._start_rest()
             self.state = "paused"
         elif self.state == "break":
             self._resume_after_break = False
@@ -231,6 +274,7 @@ class Engine:
             return
         self._state_before_break = self.state
         self._resume_after_break = self.state == "running"
+        self._start_rest()
         self.pending_break = kinds
         self.state = "break"
 
@@ -266,6 +310,7 @@ class Engine:
         can_resume = can_resume and (self.mode != "timer" or self.timer_remaining > EPSILON)
         if self._resume_after_break and can_resume:
             self.state = "running"
+            self._rest_started_at = None
         else:
             self.state = "idle" if self._state_before_break == "idle" else "paused"
         self._resume_after_break = False
@@ -280,6 +325,10 @@ class Engine:
             "since_movement", "break_count",
         )
         return {"version": 1, "day": self._day,
+                "saved_at": _nonnegative_number(
+                    self._wall_clock(), 0.0, 100_000_000_000.0
+                ),
+                "rest_elapsed": self._rest_elapsed(),
                 **{name: getattr(self, name) for name in names}}
 
     def restore(self, data: dict) -> None:
@@ -306,4 +355,23 @@ class Engine:
         self._resume_after_break = False
         self._state_before_break = self.state
         self._last = float(self._clock())
+        # Monotonic/boottime values cannot safely cross a reboot. Persist the
+        # already elapsed rest duration plus a wall timestamp instead. Legacy
+        # or malformed snapshots preserve cadence and begin a new rest now.
+        saved_at = _nonnegative_number(
+            data.get("saved_at"), -1.0, 100_000_000_000.0
+        )
+        saved_rest = _nonnegative_number(
+            data.get("rest_elapsed"), 0.0, 10 * 365 * 86400.0
+        )
+        if saved_at >= 0:
+            wall_now = _nonnegative_number(
+                self._wall_clock(), saved_at, 100_000_000_000.0
+            )
+            offline = max(0.0, wall_now - saved_at)
+            total_rest = min(10 * 365 * 86400.0, saved_rest + offline)
+            self._rest_started_at = self._last - total_rest
+            self._apply_long_rest()
+        else:
+            self._rest_started_at = self._last
         self._events = []

@@ -41,36 +41,42 @@ The main window and the mini window are two views of the same session. Opening o
 
 ### Eye-rest reminders
 
-The default is a 20-second eye-rest reminder after every 20 minutes of active work. The primary guidance is to stop looking at the display and look at a real object approximately 6 metres (20 feet) away. The animation explains the activity; users are not asked to track an on-screen object during the rest itself.
+The default eye reminder becomes due after 20 minutes in the current work period. Every automatic eye flow retains the source-backed step of looking away from the display at a real object approximately 6 metres (20 feet) away for 20 seconds. It also includes a 10-second natural-blinking cue, alternating the order between distance → blink and blink → distance on successive flows. The complete automatic eye flow is 30 seconds; the verified 20-second distance step is never shortened or omitted.
+
+The animation explains each activity. During the distance step, users are not asked to track an on-screen object and do not need to keep looking at the display.
 
 The interval can be enabled, disabled, or changed in Settings.
 
 ### Movement reminders
 
-The default movement reminder appears after 60 minutes of active work and provides a five-minute screen-away break. Available guided activities include:
+The default movement reminder becomes due after 60 minutes in the current work period. Each automatic movement flow selects three source-backed short exercises from a rotating pool, then uses the remaining time for a screen-away remainder. The exercises and remainder together always total exactly five minutes.
 
-- a short walk or posture change;
+The rotating short-exercise pool includes:
+
 - controlled sit-to-stand repetitions;
 - supported heel raises;
 - a gentle seated chest stretch;
 - shoulder rolls;
 - opening and closing the hands.
 
-Movement guidance includes an instruction to stay within a comfortable range and stop if pain occurs. Short guided movements are options within the five-minute screen-away break, not a claim that a few seconds of animation replaces the full break.
+The library also offers a standalone five-minute walk, screen-away task, or posture-change activity. Movement guidance includes an instruction to stay within a comfortable range and stop if pain occurs. The three short guided movements are components of the automatic five-minute break; they do not replace its screen-away remainder.
+
+![Timee rotating movement break](docs/screenshots-timee/movement-break.png)
 
 ### Calm reminder scheduling
 
-- Reminder cadence advances only while a counter is actively running.
-- Paused time, exercise time, and system suspend time do not advance the next reminder.
-- Eye and movement reminders that fall within three minutes of each other are combined into one break flow.
+- Reminder cadence measures active time in the current uninterrupted-work period and advances only while a counter is running.
+- A manual pause shorter than five minutes is treated as a frozen continuation of that work period. When work resumes, the countdown continues from where it stopped; other nonworking time likewise does not advance it.
+- Any contiguous nonworking pause of at least five minutes resets both the eye and movement cadences before work resumes. The reset changes neither recorded work time nor the completed-break count.
+- Eye and movement reminders that fall within three minutes of each other are combined into one flow. The automatic combined flow lasts exactly 5 minutes 30 seconds: the 30-second eye flow followed by the five-minute movement flow.
 - Timer or daily-goal completion takes priority over a reminder.
-- Completing a break increments the completed-break count.
+- Completing an entire automatic flow increments the completed-break count once, regardless of how many steps it contains.
 - Skipping or closing a break resets that reminder's cadence and resumes a previously running timer, but does not record a completed break.
-- Starting an exercise manually from the library pauses the active timer; if the timer was already idle or paused, it stays that way afterward.
+- Starting an exercise manually from the library opens only the selected activity and pauses the active timer; if the timer was already idle or paused, it stays that way afterward.
 
 ### Guided activity library
 
-Timee contains animated, source-linked guidance for eye rest and gentle desk-friendly movement. Each card shows the activity, suggested repetitions or duration, where it can be performed, and the institution used as its source.
+Timee contains animated, source-linked guidance for eye rest and gentle desk-friendly movement. Each card shows the activity, suggested repetitions or duration, where it can be performed, and the institution used as its source. A manual library session remains a single selected exercise; automatic reminder rotation and bundling apply only to automatic flows.
 
 Animations can be reduced in Settings. Sound is disabled by default and can be enabled for the end of a guided activity.
 
@@ -99,15 +105,15 @@ Timee does not require an account, server, or internet connection for normal use
 
 Writes use a temporary file followed by an atomic replacement. If the original JSON is damaged or unreadable, Timee preserves it and writes new data to a recovery file rather than overwriting the damaged evidence. A lock file prevents two Timee processes from writing to the same data directory concurrently.
 
-Restored sessions never start unattended: a running or break state is restored as paused, and time spent while the application was closed is not counted.
+Restored sessions never start unattended: a running or break state is restored as paused, and time spent while the application was closed is not counted. Persisted paused state includes a wall-clock timestamp. If the contiguous paused or offline period reaches five minutes, Timee safely resets both reminder cadences on restore; a shorter offline pause preserves the frozen cadence. Neither case adds work time or records a completed break.
 
 ## Health guidance and evidence boundaries
 
 Timee is a break reminder and activity guide. It is not medical advice, a vision treatment, a diagnostic tool, or a personalised exercise programme.
 
-The default eye-rest guidance is based on the American Optometric Association's practical 20-20-20 recommendation and the American Academy of Ophthalmology's guidance to blink and periodically look away from a screen. The default movement interval is a product choice based on the UK Health and Safety Executive's example of a 5–10 minute screen break after 50–60 minutes of continuous display work. The movement instructions are mapped to NHS and Newcastle Hospitals NHS guidance.
+The default eye-rest guidance is based on the American Optometric Association's practical 20-20-20 recommendation and the American Academy of Ophthalmology's guidance to blink and periodically look away from a screen. The default movement interval is a product choice based on the UK Health and Safety Executive's example of a 5–10 minute screen break after 50–60 minutes of continuous display work. The individual movement instructions are mapped to NHS and Newcastle Hospitals NHS guidance.
 
-These sources support practical break and movement guidance; they do not prove that every activity works for every person or that the exact 20-20-20 numbers are optimal. Timee makes no claim to correct myopia, strengthen eye muscles, or improve vision through on-screen tracking.
+The 10-second blink cue, alternating eye-step order, three-exercise rotation, bundling, screen-away remainder, and five-minute cadence-reset rule are Timee presentation and scheduling heuristics, not a source-validated clinical protocol. The sources support practical break and movement guidance; they do not prove that every activity works for every person or that the exact 20-20-20 numbers are optimal. Timee makes no claim to correct myopia, strengthen eye muscles, or improve vision through on-screen tracking.
 
 See [the source and evidence notes](docs/health-sources.md) for the complete mapping, limitations, and links.
 
@@ -310,7 +316,8 @@ The internal Python package is currently named `mola`; this does not affect the 
 │   ├── test_engine.py
 │   ├── test_integration.py
 │   ├── test_planner.py
-│   └── test_storage.py
+│   ├── test_storage.py
+│   └── test_wellness.py
 ├── pyproject.toml
 ├── requirements.txt
 └── run.sh
@@ -338,6 +345,9 @@ The tests cover:
 - work-only accounting and daily targets;
 - simultaneous and near-simultaneous reminders;
 - completed, skipped, closed, and manually opened break flows;
+- short manual-pause cadence freezing and five-minute nonworking-pause resets;
+- persisted and offline paused-time reset behavior;
+- alternating automatic eye flows, rotating three-exercise movement bundles, and exact 5:00/5:30 flow durations;
 - system-suspend gaps and day rollover;
 - save and restore behavior;
 - legacy Mola-to-Timee state migration;

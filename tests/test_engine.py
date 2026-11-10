@@ -10,6 +10,7 @@ from mola.engine import Engine, default_clock
 class Clock:
     def __init__(self):
         self.time = 100.0
+        self.wall = 1_700_000_000.0
         self.day = date(2026, 11, 9)
 
     def __call__(self):
@@ -19,13 +20,21 @@ class Clock:
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.clock = Clock()
-        self.engine = Engine(self.clock, lambda: self.clock.day)
+        self.engine = self.new_engine()
+
+    def new_engine(self):
+        return Engine(self.clock, lambda: self.clock.day, wall_clock=lambda: self.clock.wall)
+
+    def elapse(self, seconds):
+        """Move both clocks without ticking, as during inactivity or shutdown."""
+        self.clock.time += seconds
+        self.clock.wall += seconds
 
     def advance(self, seconds):
         events = []
         while seconds > 0:
             step = min(seconds, 1)
-            self.clock.time += step
+            self.elapse(step)
             events.extend(self.engine.tick())
             seconds -= step
         return events
@@ -40,6 +49,73 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.engine.stopwatch_elapsed, 17)
         self.assertEqual(self.engine.today_work, 17)
         self.assertEqual(self.engine.total_work, 17)
+
+    def test_pause_shorter_than_five_minutes_preserves_current_work_period(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        self.elapse(299.999)
+        self.assertTrue(self.engine.start())
+        self.assertEqual(self.engine.since_eye, 10)
+        self.assertEqual(self.engine.since_movement, 10)
+        self.advance(1)
+        self.assertEqual(self.engine.since_eye, 11)
+        self.assertEqual(self.engine.today_work, 11)
+
+    def test_exact_five_minute_pause_resets_cadence_but_preserves_work_and_goal(self):
+        self.engine.goal_enabled = True
+        self.engine.goal_seconds = 1000
+        self.engine.start()
+        self.advance(7)
+        self.engine.switch_mode("timer")
+        self.engine.set_timer(100)
+        self.engine.start()
+        self.advance(13)
+        self.engine.pause()
+        self.elapse(300)
+        self.assertTrue(self.engine.start())
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.stopwatch_elapsed, 7)
+        self.assertEqual(self.engine.timer_remaining, 87)
+        self.assertEqual(self.engine.today_work, 20)
+        self.assertEqual(self.engine.total_work, 20)
+        self.assertEqual(self.engine.remaining_goal, 980)
+        self.advance(1)
+        self.assertEqual(self.engine.since_eye, 1)
+        self.assertEqual(self.engine.timer_remaining, 86)
+        self.assertEqual(self.engine.remaining_goal, 979)
+
+    def test_separate_short_pauses_do_not_accumulate_into_a_full_rest(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        self.elapse(200)
+        self.engine.start()
+        self.advance(1)
+        self.engine.pause()
+        self.elapse(200)
+        self.engine.start()
+        self.assertEqual(self.engine.since_eye, 11)
+        self.assertEqual(self.engine.since_movement, 11)
+        self.assertEqual(self.engine.today_work, 11)
+
+    def test_paused_controls_do_not_restart_contiguous_rest_tracking(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        self.elapse(120)
+        self.engine.pause()
+        self.engine.reset_current()
+        self.elapse(100)
+        self.engine.switch_mode("timer")
+        self.engine.set_timer(600)
+        self.elapse(80)
+        self.engine.start()
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.today_work, 10)
+        self.assertEqual(self.engine.timer_remaining, 600)
 
     def test_controls_sync_partial_tick_without_losing_events(self):
         self.engine.eye_interval = 1
@@ -180,6 +256,21 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.engine.tick(), ["break"])
         self.assertEqual(self.engine.pending_break, ("eye",))
 
+    def test_five_minutes_after_timer_completion_clears_overdue_reminder(self):
+        self.engine.switch_mode("timer")
+        self.engine.set_timer(10)
+        self.engine.eye_interval = 10
+        self.engine.start()
+        self.assertEqual(self.advance(10), ["timer_done"])
+        self.elapse(300)
+        self.assertTrue(self.engine.start())
+        self.assertEqual(self.engine.tick(), [])
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.timer_remaining, 10)
+        self.assertEqual(self.engine.today_work, 10)
+        self.assertEqual(self.advance(1), [])
+
     def test_goal_and_timer_complete_together_without_popup(self):
         self.engine.switch_mode("timer")
         self.engine.set_timer(4)
@@ -224,6 +315,32 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.engine.state, "paused")
         self.assertEqual(self.engine.tick(), [])
 
+    def test_five_minute_suspend_starts_a_fresh_work_period(self):
+        self.engine.start()
+        self.advance(10)
+        self.elapse(300)
+        self.assertEqual(self.engine.tick(), ["suspended"])
+        self.assertEqual(self.engine.state, "paused")
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.today_work, 10)
+        self.assertEqual(self.engine.stopwatch_elapsed, 10)
+        self.engine.start()
+        self.assertEqual(self.advance(1), [])
+        self.assertEqual(self.engine.since_eye, 1)
+
+    def test_short_suspend_and_following_pause_are_one_contiguous_rest(self):
+        self.engine.start()
+        self.advance(10)
+        self.elapse(100)
+        self.assertEqual(self.engine.tick(), ["suspended"])
+        self.assertEqual(self.engine.since_eye, 10)
+        self.elapse(200)
+        self.engine.start()
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.today_work, 10)
+
     def test_linux_default_clock_detects_system_suspend(self):
         with patch("mola.engine.time.CLOCK_BOOTTIME", 7, create=True), \
                 patch("mola.engine.time.clock_gettime", side_effect=[100, 100, 200], create=True) as boot:
@@ -257,13 +374,110 @@ class EngineTests(unittest.TestCase):
         self.advance(8)
         saved = json.loads(json.dumps(self.engine.snapshot(), allow_nan=False))
         self.clock.time += 500
-        new = Engine(self.clock, lambda: self.clock.day)
+        new = self.new_engine()
         new.restore(saved)
         self.assertEqual(new.state, "paused")
         self.assertEqual(new.tick(), [])
         self.assertEqual(new.today_work, 8)
         self.assertEqual(new.stopwatch_elapsed, 8)
         self.assertEqual(new.pending_break, ())
+
+    def test_immediate_reopen_preserves_cadence_and_never_resumes_itself(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        saved = self.engine.snapshot()
+        new = self.new_engine()
+        new.restore(saved)
+        self.assertEqual(new.state, "paused")
+        self.assertEqual(new.since_eye, 10)
+        self.assertEqual(new.since_movement, 10)
+        self.assertTrue(new.start())
+        self.assertEqual(new.since_eye, 10)
+        self.assertEqual(new.today_work, 10)
+
+    def test_saved_rest_and_offline_time_combine_across_reboot(self):
+        self.engine.goal_enabled = True
+        self.engine.goal_seconds = 1000
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        self.elapse(120)
+        saved = json.loads(json.dumps(self.engine.snapshot()))
+        self.clock.wall += 180
+        self.clock.time = 2  # A reboot gives BOOTTIME a different origin.
+        new = self.new_engine()
+        new.restore(saved)
+        self.assertEqual(new.state, "paused")
+        self.assertTrue(new.start())
+        self.assertEqual(new.since_eye, 0)
+        self.assertEqual(new.since_movement, 0)
+        self.assertEqual(new.stopwatch_elapsed, 10)
+        self.assertEqual(new.today_work, 10)
+        self.assertEqual(new.total_work, 10)
+        self.assertEqual(new.remaining_goal, 990)
+
+    def test_offline_rest_short_of_threshold_is_preserved_until_remaining_second(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        self.elapse(120)
+        saved = self.engine.snapshot()
+        self.elapse(179)
+        new = self.new_engine()
+        new.restore(saved)
+        self.assertEqual(new.since_eye, 10)
+        self.assertEqual(new.since_movement, 10)
+        self.elapse(1)
+        self.assertTrue(new.start())
+        self.assertEqual(new.since_eye, 0)
+        self.assertEqual(new.since_movement, 0)
+
+    def test_legacy_snapshot_begins_fresh_rest_without_guessing_time_away(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        saved = self.engine.snapshot()
+        saved.pop("saved_at", None)
+        saved.pop("rest_elapsed", None)
+        saved["version"] = 1
+        self.elapse(1000)
+        new = self.new_engine()
+        new.restore(saved)
+        self.assertEqual(new.since_eye, 10)
+        self.assertEqual(new.since_movement, 10)
+        self.elapse(299)
+        new.tick()
+        self.assertEqual(new.since_eye, 10)
+        self.elapse(1)
+        self.assertTrue(new.start())
+        self.assertEqual(new.since_eye, 0)
+        self.assertEqual(new.since_movement, 0)
+
+    def test_future_saved_timestamp_does_not_create_false_offline_rest(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        saved = self.engine.snapshot()
+        saved["saved_at"] = self.clock.wall + 600
+        new = self.new_engine()
+        new.restore(saved)
+        self.assertTrue(new.start())
+        self.assertEqual(new.since_eye, 10)
+        self.assertEqual(new.since_movement, 10)
+
+    def test_negative_saved_timestamp_is_treated_as_legacy_data(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        saved = self.engine.snapshot()
+        saved["saved_at"] = -1
+        self.elapse(1000)
+        new = self.new_engine()
+        new.restore(saved)
+        self.assertTrue(new.start())
+        self.assertEqual(new.since_eye, 10)
+        self.assertEqual(new.since_movement, 10)
 
     def test_saved_break_restores_paused(self):
         self.engine.start()
@@ -341,9 +555,35 @@ class EngineTests(unittest.TestCase):
         self.engine.start()
         self.advance(3)
         self.engine.begin_break(("eye",))
+        self.elapse(20)
         self.engine.finish_break()
         self.assertEqual(self.engine.since_eye, 0)
         self.assertEqual(self.engine.since_movement, 3)
+
+    def test_five_minute_eye_dialog_also_resets_movement_cadence(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.begin_break(("eye",))
+        self.elapse(300)
+        self.engine.finish_break()
+        self.assertEqual(self.engine.state, "running")
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.today_work, 10)
+        self.assertEqual(self.engine.break_count, 1)
+
+    def test_pause_and_dialog_share_a_single_contiguous_rest(self):
+        self.engine.start()
+        self.advance(10)
+        self.engine.pause()
+        self.elapse(290)
+        self.engine.begin_break(("eye",))
+        self.elapse(20)
+        self.engine.finish_break()
+        self.assertEqual(self.engine.state, "paused")
+        self.assertEqual(self.engine.since_eye, 0)
+        self.assertEqual(self.engine.since_movement, 0)
+        self.assertEqual(self.engine.today_work, 10)
 
 
 if __name__ == "__main__":

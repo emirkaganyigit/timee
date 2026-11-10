@@ -21,7 +21,10 @@ from .engine import Engine
 from .planner import DAYS, PlannerWidget
 from .storage import Store
 from .theme import apply_theme, button, card, clock_text, human_time, label
-from .wellness import BreakDialog, EXERCISE_MAP, LibraryWidget
+from .wellness import (
+    BreakDialog, EXERCISE_MAP, LibraryWidget, normalize_rotation,
+    plan_automatic_break,
+)
 
 MONTHS = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
 
@@ -136,7 +139,7 @@ class SettingsWidget(QWidget):
         self.movement_minutes.setAccessibleName("Hareket molası sıklığı")
         for check,spin in ((self.eye,self.eye_minutes),(self.movement,self.movement_minutes)):
             row=QHBoxLayout(); row.addWidget(check,1); row.addWidget(spin); box.addLayout(row)
-        box.addWidget(label("Önerilen başlangıç: 20 dakikada 20 saniye uzağa bakış; 60 dakikada 5 dakika hareket. Aralarında en fazla 3 dakika olan molalar birleşir. Sayaç dururken hatırlatma süresi ilerlemez.","muted",True))
+        box.addWidget(label("Önerilen başlangıç: kesintisiz 20 dakikada göz molası; 60 dakikada 5 dakika hareket. Yakın molalar birleşir. Kısa duraklamalarda süre ilerlemez; 5 dakika veya daha uzun duraklama yeni bir çalışma periyodu başlatır.","muted",True))
         save=button("Mola düzenini kaydet", self.save_intervals,"primary"); box.addWidget(save,alignment=Qt.AlignmentFlag.AlignLeft)
         self.saved=label("", "hint"); box.addWidget(self.saved)
         layout.addWidget(frame)
@@ -187,6 +190,7 @@ class Window(QMainWindow):
             "sound": prefs.get("sound") is True,
             "mini_size": mini_size,
         }
+        self.exercise_rotation = normalize_rotation(data.get("exercise_rotation"))
         self.break_dialog=None
         self.mini=None
         self.notice=None
@@ -293,7 +297,13 @@ class Window(QMainWindow):
     def save(self):
         if not hasattr(self,"planner"):
             return
-        state={"version":1,"engine":self.engine.snapshot(),"planner":self.planner.entries,"preferences":self.preferences}
+        state={
+            "version": 1,
+            "engine": self.engine.snapshot(),
+            "planner": self.planner.entries,
+            "preferences": self.preferences,
+            "exercise_rotation": self.exercise_rotation,
+        }
         if not self.store.save(state):
             self.show_banner(self.store.error)
 
@@ -387,7 +397,24 @@ class Window(QMainWindow):
     def open_break(self,exercise=None):
         if self.break_dialog is not None or not self.engine.pending_break:
             return
-        self.break_dialog=BreakDialog(self.engine.pending_break,self,exercise,self.preferences["reduced_motion"],self.preferences["sound"])
+        kinds = self.engine.pending_break
+        if exercise:
+            selected = EXERCISE_MAP[exercise]
+            planned_steps = [(dict(selected), int(selected["duration"]))]
+            remaining_kinds = tuple(kind for kind in kinds if kind != selected["kind"])
+            if remaining_kinds:
+                extra_steps, self.exercise_rotation = plan_automatic_break(
+                    remaining_kinds, self.exercise_rotation
+                )
+                planned_steps.extend(extra_steps)
+        else:
+            planned_steps, self.exercise_rotation = plan_automatic_break(
+                kinds, self.exercise_rotation
+            )
+        self.break_dialog=BreakDialog(
+            kinds, self, exercise, self.preferences["reduced_motion"],
+            self.preferences["sound"], planned_steps,
+        )
         self.break_dialog.completed.connect(self.finish_break)
         self.break_dialog.show(); self.break_dialog.raise_(); self.break_dialog.activateWindow()
         QApplication.alert(self,0)

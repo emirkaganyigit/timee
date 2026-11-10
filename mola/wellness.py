@@ -12,12 +12,83 @@ from .theme import button, card, clock_text, label
 
 SOURCE_MAP = {source["id"]: source for source in SOURCES}
 EXERCISE_MAP = {exercise["id"]: exercise for exercise in EXERCISES}
+ROTATION_VERSION = 1
+EYE_ORDERS = (("distance", "blink"), ("blink", "distance"))
+SHORT_MOVEMENT_IDS = ("shoulders", "hands", "chest", "sitstand", "calf")
+MOVEMENT_BREAK_SECONDS = 5 * 60
+SCREEN_REST = {
+    "id": "screen_rest",
+    "title": "Molayı ekran dışında tamamla",
+    "kind": "movement",
+    "animation": "walk",
+    "duration": 0,
+    "reps": "Kalan süre · ekrandan uzakta",
+    "instruction": "Kısa hareketleri tamamladın. Şimdi ekrandan uzaklaş; rahatça yürü, su al veya duruşunu değiştir. Sayaç bitene kadar ekrana bakman gerekmiyor.",
+    "source": "hse",
+    "place": "Ekran dışında",
+}
+
+
+def _rotation_cursor(value, modulo):
+    return value % modulo if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def normalize_rotation(value):
+    """Return a safe, JSON-friendly automatic-exercise rotation state."""
+    if (not isinstance(value, dict)
+            or ("version" in value and value.get("version") != ROTATION_VERSION)):
+        value = {}
+    return {
+        "version": ROTATION_VERSION,
+        "eye": _rotation_cursor(value.get("eye"), len(EYE_ORDERS)),
+        "movement": _rotation_cursor(value.get("movement"), len(SHORT_MOVEMENT_IDS)),
+    }
+
+
+def _catalog_step(identifier):
+    item = dict(EXERCISE_MAP[identifier])
+    return item, int(item["duration"])
+
+
+def plan_automatic_break(kinds, rotation):
+    """Build a varied, deterministic break plan and its next cursor state.
+
+    Eye plans always retain the sourced 20-second distant-view step. Movement
+    plans contain three sourced short activities and a screen-away remainder,
+    so the complete movement portion remains exactly five minutes.
+    """
+    kinds = tuple(kind for kind in ("eye", "movement") if kind in kinds)
+    if not kinds:
+        raise ValueError("a break needs 'eye' and/or 'movement'")
+    current = normalize_rotation(rotation)
+    following = dict(current)
+    steps = []
+    if "eye" in kinds:
+        cursor = current["eye"]
+        steps.extend(_catalog_step(identifier) for identifier in EYE_ORDERS[cursor])
+        following["eye"] = (cursor + 1) % len(EYE_ORDERS)
+    if "movement" in kinds:
+        cursor = current["movement"]
+        identifiers = tuple(
+            SHORT_MOVEMENT_IDS[(cursor + offset) % len(SHORT_MOVEMENT_IDS)]
+            for offset in range(3)
+        )
+        movement_steps = [_catalog_step(identifier) for identifier in identifiers]
+        used = sum(duration for _, duration in movement_steps)
+        remainder = MOVEMENT_BREAK_SECONDS - used
+        if remainder <= 0:
+            raise ValueError("short movement plan must leave screen-away time")
+        steps.extend(movement_steps)
+        steps.append((dict(SCREEN_REST), remainder))
+        following["movement"] = (cursor + 3) % len(SHORT_MOVEMENT_IDS)
+    return steps, following
 
 
 class BreakDialog(QDialog):
     completed = Signal(bool)
 
-    def __init__(self, kinds, parent=None, exercise=None, reduced=False, sound=False):
+    def __init__(self, kinds, parent=None, exercise=None, reduced=False, sound=False,
+                 planned_steps=None):
         super().__init__(parent)
         self.setWindowTitle("Timee · Kendine kısa bir ara ver")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
@@ -26,17 +97,18 @@ class BreakDialog(QDialog):
         self.resize(580, 650)
         self.reduced, self.sound = reduced, sound
         self.steps = []
-        self.manual = bool(exercise and len(kinds) == 1)
         self.finished_once, self.started_at, self.elapsed = False, None, 0.0
         self.step = 0
-        if exercise and len(kinds) == 1:
+        if planned_steps is not None:
+            self.steps = [(dict(item), int(duration)) for item, duration in planned_steps]
+        elif exercise:
             item = EXERCISE_MAP[exercise]
-            self.steps.append((item, item["duration"]))
+            self.steps.append((dict(item), item["duration"]))
         else:
-            if "eye" in kinds:
-                self.steps.append((EXERCISE_MAP["distance"], 20))
-            if "movement" in kinds:
-                self.steps.append((EXERCISE_MAP["walk"], 300))
+            self.steps, _ = plan_automatic_break(kinds, None)
+        if not self.steps:
+            raise ValueError("a break needs at least one exercise step")
+        self.manual = bool(exercise and len(self.steps) == 1)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(28, 25, 28, 25)
@@ -78,10 +150,10 @@ class BreakDialog(QDialog):
         self.chooser.blockSignals(True)
         self.chooser.setCurrentIndex(max(0, self.chooser.findData(self.item["id"])))
         self.chooser.blockSignals(False)
-        self.chooser.setVisible(self.item["kind"] == "movement")
+        self.chooser.setVisible(self.manual and self.item["kind"] == "movement")
         self.chooser.setEnabled(True)
         self.set_exercise(self.item)
-        self.primary.setText("Egzersizi başlat")
+        self.primary.setText("Molayı başlat" if self.item["id"] == "screen_rest" else "Egzersizi başlat")
         self.primary.setEnabled(True)
         self.countdown.setText(clock_text(self.duration, False))
         self.progress.setValue(0)
@@ -94,10 +166,10 @@ class BreakDialog(QDialog):
         self.animation.update()
         self.meta.setText(item["reps"] + "  ·  " + item["place"])
         self.instruction.setText(item["instruction"])
-        if item["kind"] == "movement":
+        if item["id"] == "screen_rest":
+            hint = "Bu kalan süre ekran dışı mola içindir; animasyonu izlemen gerekmiyor."
+        elif item["kind"] == "movement":
             hint = "Rahat hareket aralığında uygula; ağrı olursa dur."
-            if self.duration == 300:
-                hint += " Hareketini bitirince molanın kalanında ekrandan uzak kal."
         else:
             hint = "Animasyon yalnızca yönergedir. Molada ekrana bakman gerekmiyor."
         self.safety.setText(hint)
@@ -126,9 +198,10 @@ class BreakDialog(QDialog):
             if self.manual:
                 self.chooser.setEnabled(False)
             self.timer.start()
-            # Once instructions are read, the cue need not keep moving.
-            if self.item["kind"] == "eye":
-                self.animation.timer.stop()
+            # The cue explains the step before it begins. Once the instructions
+            # are read, stop it so the timed activity never requires watching
+            # the screen.
+            self.animation.timer.stop()
         elif self.elapsed >= self.duration:
             if self.step + 1 < len(self.steps):
                 self.step += 1
@@ -147,7 +220,11 @@ class BreakDialog(QDialog):
         if self.elapsed >= self.duration:
             self.timer.stop()
             self.primary.setEnabled(True)
-            self.primary.setText("Hareket molasına geç →" if self.step+1 < len(self.steps) else "Egzersizi tamamla ve devam et")
+            if self.step + 1 < len(self.steps):
+                next_item = self.steps[self.step + 1][0]
+                self.primary.setText(f"Sıradaki: {next_item['title']}  →")
+            else:
+                self.primary.setText("Molayı tamamla ve devam et")
             if self.sound:
                 QApplication.beep()
 
