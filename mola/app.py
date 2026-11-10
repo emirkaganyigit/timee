@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from .animation import TimerDial
 from .content import SOURCES
-from .engine import Engine
+from .engine import EPSILON, Engine
 from .planner import DAYS, PlannerWidget
 from .storage import Store
 from .theme import apply_theme, button, card, clock_text, human_time, label
@@ -27,6 +27,7 @@ from .wellness import (
 )
 
 MONTHS = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
+GOAL_COMPLETE_BANNER = "Bugünkü hedefin tamamlandı. Düzenle ile hedefi artırabilir veya hedefte durmayı kapatabilirsin."
 
 
 def app_icon():
@@ -194,6 +195,7 @@ class Window(QMainWindow):
         self.break_dialog=None
         self.mini=None
         self.notice=None
+        self.notice_kind=None
         self.pending_notice=None
         self.closing=False
         self.setWindowTitle("Timee · Çalışma alanın")
@@ -267,6 +269,9 @@ class Window(QMainWindow):
         right=QVBoxLayout(); right.setSpacing(16)
         goal,box=card("softCard",18); box.setSpacing(8)
         row=QHBoxLayout(); row.addWidget(label("Günlük çalışma hedefi","sectionTitle")); row.addStretch()
+        self.goal_reset=button("Sıfırla",self.confirm_reset_goal,"link")
+        self.goal_reset.setToolTip("Hedef ilerlemesini sıfırlar; bugünkü toplam çalışma süren korunur")
+        row.addWidget(self.goal_reset)
         edit=button("Düzenle",self.edit_goal,"link"); row.addWidget(edit); box.addLayout(row)
         self.goal_remaining=label("4 sa 00 dk", "number"); box.addWidget(self.goal_remaining)
         self.goal_caption=label("hedefine kalan süre", "muted"); box.addWidget(self.goal_caption)
@@ -312,9 +317,9 @@ class Window(QMainWindow):
         if "break" in events:
             self.open_break()
         if "goal_done" in events:
-            self.show_notice("Bugünkü hedefine ulaştın.","Aktif çalışma hedefin tamamlandı. Yeni bir hedef belirleyebilir ya da hedefte durmayı kapatabilirsin.")
+            self.show_notice("Bugünkü hedefine ulaştın.","Aktif çalışma hedefin tamamlandı. Yeni bir hedef belirleyebilir ya da hedefte durmayı kapatabilirsin.","goal")
         elif "timer_done" in events:
-            self.show_notice("Odak süren tamamlandı.","Güzel bir ara verme zamanı. Başlat düğmesiyle yeni bir zamanlayıcı başlatabilirsin.")
+            self.show_notice("Odak süren tamamlandı.","Güzel bir ara verme zamanı. Başlat düğmesiyle yeni bir zamanlayıcı başlatabilirsin.","timer")
         if "suspended" in events:
             self.show_banner("Uzun bir kesinti algılandı; sayaç duraklatıldı. Hazır olduğunda Başlat ile devam et.")
         self.refresh()
@@ -337,7 +342,8 @@ class Window(QMainWindow):
         self.today.setText(human_time(e.today_work)); self.breaks.setText(str(e.break_count))
         self.goal_remaining.setText(clock_text(math.ceil(e.remaining_goal)) if e.goal_enabled else human_time(math.ceil(e.remaining_goal/60)*60))
         self.goal_caption.setText("hedefin tamamlandı" if e.remaining_goal<=0 else "hedefine kalan süre / "+human_time(e.goal_seconds))
-        self.goal_progress.setValue(min(1000,int(1000*e.today_work/e.goal_seconds)))
+        self.goal_progress.setValue(min(1000,int(1000*e.goal_work/e.goal_seconds)))
+        self.goal_reset.setEnabled(e.goal_work > 0 and e.state != "break")
         self.eye_next.setText(f"{math.ceil(e.next_eye/60)} dk çalışma sonrası" if e.eye_enabled else "Hatırlatma kapalı")
         self.move_next.setText(f"{math.ceil(e.next_movement/60)} dk çalışma sonrası" if e.movement_enabled else "Hatırlatma kapalı")
         if hasattr(self,"planner"):
@@ -352,7 +358,7 @@ class Window(QMainWindow):
         if self.engine.state=="running":
             self.engine.pause()
         elif not self.engine.start() and self.engine.remaining_goal<=0:
-            self.show_banner("Bugünkü hedefin tamamlandı. Düzenle ile hedefi artırabilir veya hedefte durmayı kapatabilirsin.")
+            self.show_banner(GOAL_COMPLETE_BANNER)
         else:
             self.banner.hide()
         self.pulse(); self.save()
@@ -382,6 +388,25 @@ class Window(QMainWindow):
 
     def edit_goal(self):
         self.duration_dialog("Günlük hedef süresi",self.engine.goal_seconds/60,1440,lambda seconds:setattr(self.engine,"goal_seconds",seconds))
+
+    def confirm_reset_goal(self):
+        if self.engine.goal_work <= 0:
+            return
+        dialog=QDialog(self); dialog.setWindowTitle("Bugünkü ilerlemeyi sıfırla"); dialog.setMinimumWidth(430)
+        layout=QVBoxLayout(dialog); layout.setContentsMargins(26,26,26,26); layout.setSpacing(16)
+        layout.addWidget(label("Bugünkü hedef ilerlemesini sıfırla?","sectionTitle",True))
+        layout.addWidget(label("Yalnızca günlük hedef ilerlemesi başa döner. Bugün odaklandığın toplam süre, hedef süresi, açık sayaç, mola düzeni, tamamlanan molalar ve toplam çalışma kaydın korunur.","muted",True))
+        row=QHBoxLayout(); row.addStretch(); row.addWidget(button("Vazgeç",dialog.reject))
+        row.addWidget(button("Bugünü sıfırla",dialog.accept,"danger")); layout.addLayout(row)
+        if dialog.exec()==QDialog.DialogCode.Accepted:
+            self.engine.reset_goal_progress()
+            if self.notice_kind == "goal" and self.notice:
+                self.notice.close()
+            if self.pending_notice and self.pending_notice[2] == "goal":
+                self.pending_notice=None
+            if self.banner.text() == GOAL_COMPLETE_BANNER:
+                self.banner.hide()
+            self.pulse(); self.save()
 
     def open_mini(self):
         if self.mini is None:
@@ -428,15 +453,17 @@ class Window(QMainWindow):
             dialog.deleteLater()
         self.refresh(); self.save()
         if self.pending_notice:
-            title,text=self.pending_notice
+            title,text,kind=self.pending_notice
             self.pending_notice=None
-            QTimer.singleShot(0,lambda:self.show_notice(title,text))
+            QTimer.singleShot(0,lambda:self.show_notice(title,text,kind))
 
-    def show_notice(self,title,text):
+    def show_notice(self,title,text,kind=None):
         if self.closing:
             return
+        if kind=="goal" and self.engine.remaining_goal > EPSILON:
+            return
         if self.break_dialog is not None:
-            self.pending_notice=(title,text)
+            self.pending_notice=(title,text,kind)
             return
         if self.notice:
             self.notice.close()
@@ -445,7 +472,14 @@ class Window(QMainWindow):
         layout=QVBoxLayout(dialog); layout.setContentsMargins(28,28,28,28); layout.setSpacing(18)
         layout.addWidget(label(title,"sectionTitle",True)); layout.addWidget(label(text,"muted",True))
         layout.addWidget(button("Devam",dialog.accept,"primary"))
-        self.notice=dialog; dialog.show(); dialog.raise_(); QApplication.alert(self)
+        self.notice=dialog; self.notice_kind=kind
+        dialog.finished.connect(lambda result,target=dialog:self._clear_notice(target))
+        dialog.show(); dialog.raise_(); QApplication.alert(self)
+
+    def _clear_notice(self,target):
+        if self.notice is target:
+            self.notice=None
+            self.notice_kind=None
 
     def closeEvent(self,event):
         self.closing=True; self.pending_notice=None

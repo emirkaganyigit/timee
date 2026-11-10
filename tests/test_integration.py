@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from mola.app import Window
 from mola.engine import Engine
@@ -70,6 +70,28 @@ class SessionDialogTests(unittest.TestCase):
         dialog.tick()
         self.assertTrue(dialog.primary.isEnabled())
         dialog.primary.click()
+
+    def accept_goal_reset(self):
+        """Accept the real confirmation dialog from its nested event loop."""
+        self.assertTrue(self.window.goal_reset.isEnabled())
+        confirmations = []
+
+        def accept_confirmation():
+            dialog = self.app.activeModalWidget()
+            if not isinstance(dialog, QDialog):
+                confirmations.append(None)
+                return
+            matches = [button for button in dialog.findChildren(QPushButton)
+                       if button.text() == "Bugünü sıfırla"]
+            confirmations.append((dialog.windowTitle(), len(matches)))
+            if len(matches) == 1:
+                matches[0].click()
+            else:
+                dialog.reject()
+
+        QTimer.singleShot(0, accept_confirmation)
+        self.window.goal_reset.click()
+        self.assertEqual(confirmations, [("Bugünkü ilerlemeyi sıfırla", 1)])
 
     def test_combined_popup_pauses_until_whole_sequence_finishes_then_resumes(self):
         self.engine.eye_interval = 3
@@ -204,6 +226,69 @@ class SessionDialogTests(unittest.TestCase):
         self.work(2)
         self.assertEqual(self.engine.today_work, 3)
         self.assertEqual(self.engine.state, "paused")
+
+    def test_confirmed_goal_reset_preserves_work_counters_and_reminder_cadence(self):
+        self.engine.goal_enabled = True
+        self.engine.goal_seconds = 60
+        self.window.toggle_running()
+        self.work(5)
+        self.window.change_mode("timer")
+        self.engine.set_timer(180)
+        self.window.toggle_running()
+        self.work(7)
+        self.engine.break_count = 2
+        self.window.refresh()
+        before = self.engine.snapshot()
+        self.assertEqual(self.engine.goal_work, 12)
+        self.assertEqual(self.engine.stopwatch_elapsed, 5)
+        self.assertEqual(self.engine.timer_remaining, 173)
+        self.assertEqual(self.engine.since_eye, 12)
+        self.assertEqual(self.engine.since_movement, 12)
+
+        self.accept_goal_reset()
+
+        after = self.engine.snapshot()
+        self.assertEqual(self.engine.goal_work, 0)
+        self.assertEqual(self.engine.remaining_goal, 60)
+        self.assertEqual(after["goal_baseline"], before["today_work"])
+        for key, value in before.items():
+            if key not in ("goal_baseline", "saved_at"):
+                with self.subTest(preserved=key):
+                    self.assertEqual(after[key], value)
+        self.assertEqual(self.window.goal_progress.value(), 0)
+        self.assertFalse(self.window.goal_reset.isEnabled())
+        self.assertEqual(
+            {key: value for key, value in self.store.data["engine"].items() if key != "saved_at"},
+            {key: value for key, value in after.items() if key != "saved_at"},
+        )
+
+        self.work(2)
+        self.assertEqual(self.engine.goal_work, 2)
+        self.assertEqual(self.engine.today_work, 14)
+        self.assertEqual(self.engine.stopwatch_elapsed, 5)
+        self.assertEqual(self.engine.timer_remaining, 171)
+        self.assertEqual(self.engine.since_eye, 14)
+        self.assertEqual(self.engine.since_movement, 14)
+        self.assertEqual(self.engine.break_count, 2)
+
+    def test_delayed_goal_notice_is_ignored_after_confirmed_reset(self):
+        self.engine.goal_enabled = True
+        self.engine.goal_seconds = 3
+        self.window.toggle_running()
+        self.work(3)
+        self.assertIsNotNone(self.window.notice)
+        self.window.notice.accept()
+        self.assertIsNone(self.window.notice)
+
+        self.accept_goal_reset()
+        QTimer.singleShot(0, lambda: self.window.show_notice(
+            "Bugünkü hedefine ulaştın.", "Gecikmiş hedef bildirimi", "goal"
+        ))
+        self.app.processEvents()
+        self.assertEqual(self.engine.goal_work, 0)
+        self.assertEqual(self.engine.today_work, 3)
+        self.assertEqual(self.engine.state, "paused")
+        self.assertIsNone(self.window.notice)
 
     def test_completion_notice_is_deferred_until_manual_exercise_closes(self):
         self.window.change_mode("timer")

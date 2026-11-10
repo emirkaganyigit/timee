@@ -87,6 +87,7 @@ class Engine:
         self.goal_enabled = False
         self.goal_seconds = 4 * 3600.0
         self.today_work = 0.0
+        self.goal_baseline = 0.0
         self.total_work = 0.0
         self.eye_enabled = True
         self.movement_enabled = True
@@ -102,8 +103,12 @@ class Engine:
         return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
     @property
+    def goal_work(self) -> float:
+        return max(0.0, self.today_work - self.goal_baseline)
+
+    @property
     def remaining_goal(self) -> float:
-        return max(0.0, self.goal_seconds - self.today_work)
+        return max(0.0, self.goal_seconds - self.goal_work)
 
     @property
     def next_eye(self) -> float:
@@ -120,6 +125,9 @@ class Engine:
                                        0, self.timer_duration)
         self.goal_seconds = _number(self.goal_seconds, 14400, 1, 7 * 86400)
         self.today_work = _number(self.today_work, 0)
+        self.goal_baseline = min(
+            self.today_work, _number(self.goal_baseline, 0, 0, self.today_work)
+        )
         self.total_work = max(_number(self.total_work, 0), self.today_work)
         self.eye_interval = _number(self.eye_interval, 1200, 1, 86400)
         self.movement_interval = _number(self.movement_interval, 3600, 1, 86400)
@@ -154,6 +162,7 @@ class Engine:
         if day != self._day:
             self._day = day
             self.today_work = 0.0
+            self.goal_baseline = 0.0
             self.break_count = 0
             self._events.append("day_changed")
         if self.state != "running":
@@ -256,6 +265,14 @@ class Engine:
         if self.state != "break":
             self.state = "idle"
 
+    def reset_goal_progress(self) -> None:
+        """Restart the daily goal without erasing today's actual work total."""
+        self._advance()
+        self.goal_baseline = self.today_work
+        # A reset performed at the exact goal boundary intentionally unlocks
+        # the goal again, so a queued completion notice is no longer relevant.
+        self._events = [event for event in self._events if event != "goal_done"]
+
     def set_timer(self, seconds: float) -> None:
         """Set the countdown length; changing it pauses an active countdown."""
         value = _number(seconds, -1, 1, 7 * 86400)
@@ -320,7 +337,7 @@ class Engine:
         self._advance()
         names = (
             "mode", "state", "stopwatch_elapsed", "timer_duration", "timer_remaining",
-            "goal_enabled", "goal_seconds", "today_work", "total_work", "eye_enabled",
+            "goal_enabled", "goal_seconds", "today_work", "goal_baseline", "total_work", "eye_enabled",
             "movement_enabled", "eye_interval", "movement_interval", "since_eye",
             "since_movement", "break_count",
         )
@@ -337,7 +354,7 @@ class Engine:
             return
         self.mode = data.get("mode") if data.get("mode") in ("timer", "stopwatch") else "stopwatch"
         for name in ("stopwatch_elapsed", "timer_duration", "timer_remaining", "goal_seconds",
-                     "today_work", "total_work", "eye_interval", "movement_interval",
+                     "today_work", "goal_baseline", "total_work", "eye_interval", "movement_interval",
                      "since_eye", "since_movement"):
             if name in data:
                 setattr(self, name, _number(data[name], getattr(self, name)))
@@ -349,6 +366,7 @@ class Engine:
         self._day = self._today_key()
         if data.get("day") != self._day:
             self.today_work = 0.0
+            self.goal_baseline = 0.0
             self.break_count = 0
         self.state = "idle" if data.get("state") == "idle" else "paused"
         self.pending_break = ()

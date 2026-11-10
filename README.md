@@ -83,10 +83,12 @@ Animations can be reduced in Settings. Sound is disabled by default and can be e
 ### Daily work target
 
 - Set a daily target shared by the stopwatch and countdown timer.
-- All active work contributes to today's total, even when “stop at target” is disabled.
+- All active work contributes to the actual today-work and lifetime totals. Goal progress counts active work since the latest local-day rollover or confirmed goal-progress reset, even when “stop at target” is disabled.
 - When “stop at target” is enabled, the active timer pauses exactly at the target boundary.
 - Breaks and manually paused time never count toward the target.
-- Today's work and completed-break count reset on the next local calendar day; lifetime work remains available internally.
+- The target card's **Reset** button asks for confirmation, then restarts only goal progress by moving its baseline to the current today-work total. The progress bar returns to zero and the full configured target becomes available again without deleting recorded work.
+- A confirmed goal-progress reset preserves the configured target duration, actual today-work and lifetime totals, stopwatch elapsed value, countdown duration and remaining value, reminder cadence, and completed-break count.
+- At the next local calendar day, Timee automatically resets the daily work total, goal baseline, and completed-break count. Lifetime work remains available internally.
 
 ### Recurring weekly planner
 
@@ -342,7 +344,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests -v
 The tests cover:
 
 - stopwatch and countdown boundaries;
-- work-only accounting and daily targets;
+- work-only accounting, daily target boundaries, and baseline-only goal-progress resets;
 - simultaneous and near-simultaneous reminders;
 - completed, skipped, closed, and manually opened break flows;
 - short manual-pause cadence freezing and five-minute nonworking-pause resets;

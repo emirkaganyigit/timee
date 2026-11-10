@@ -240,6 +240,52 @@ class EngineTests(unittest.TestCase):
         self.advance(5)
         self.assertEqual(self.engine.total_work, 7.5)
 
+    def test_reset_goal_progress_preserves_work_timers_reminders_and_breaks(self):
+        self.engine.goal_enabled = True
+        self.engine.goal_seconds = 1000
+        self.engine.break_count = 2
+        self.engine.start()
+        self.advance(7)
+        self.engine.switch_mode("timer")
+        self.engine.set_timer(100)
+        self.engine.start()
+        self.advance(13)
+
+        self.engine.reset_goal_progress()
+
+        self.assertEqual(self.engine.goal_work, 0)
+        self.assertEqual(self.engine.remaining_goal, 1000)
+        self.assertEqual(self.engine.today_work, 20)
+        self.assertEqual(self.engine.total_work, 20)
+        self.assertEqual(self.engine.stopwatch_elapsed, 7)
+        self.assertEqual(self.engine.timer_remaining, 87)
+        self.assertEqual(self.engine.since_eye, 20)
+        self.assertEqual(self.engine.since_movement, 20)
+        self.assertEqual(self.engine.break_count, 2)
+        self.assertEqual(self.engine.state, "running")
+
+        self.advance(1)
+        self.assertEqual(self.engine.goal_work, 1)
+        self.assertEqual(self.engine.today_work, 21)
+        saved = self.engine.snapshot()
+        restored = self.new_engine()
+        restored.restore(saved)
+        self.assertEqual(restored.goal_work, 1)
+        self.assertEqual(restored.today_work, 21)
+
+    def test_reset_at_goal_boundary_clears_stale_completion_and_unlocks_goal(self):
+        self.engine.goal_enabled = True
+        self.engine.goal_seconds = 3
+        self.engine.start()
+        self.elapse(3)
+        self.engine.reset_goal_progress()
+        self.assertEqual(self.engine.state, "paused")
+        self.assertEqual(self.engine.today_work, 3)
+        self.assertEqual(self.engine.goal_work, 0)
+        self.assertEqual(self.engine.remaining_goal, 3)
+        self.assertEqual(self.engine.tick(), [])
+        self.assertTrue(self.engine.start())
+
     def test_timer_finishes_before_reminder_and_can_restart(self):
         self.engine.switch_mode("timer")
         self.engine.set_timer(10)
@@ -495,6 +541,7 @@ class EngineTests(unittest.TestCase):
         self.clock.day += timedelta(days=1)
         self.assertEqual(self.engine.tick(), ["day_changed"])
         self.assertEqual(self.engine.today_work, 0)
+        self.assertEqual(self.engine.goal_baseline, 0)
         self.assertEqual(self.engine.total_work, 10)
         self.advance(2)
         self.assertEqual(self.engine.today_work, 2)
