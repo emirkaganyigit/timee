@@ -27,6 +27,7 @@ QLabel#error { color: #ffb5a3; background: #3e2823; padding: 10px; border-radius
 QFrame#card { background: #111c2e; border: 1px solid #233550; border-radius: 18px; }
 QFrame#softCard { background: #142a47; border: 1px solid #28476c; border-radius: 16px; }
 QFrame#miniSurface { background: #111c2e; border: 1px solid #355d83; border-radius: 14px; }
+QFrame#miniDivider { background: #355d83; border: none; min-width: 1px; max-width: 1px; }
 QFrame#separator { background: #263a55; max-height: 1px; }
 QPushButton { background: #172740; border: 1px solid transparent; padding: 10px 16px; border-radius: 9px; font-weight: 600; }
 QPushButton:hover { background: #1e3554; }

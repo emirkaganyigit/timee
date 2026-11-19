@@ -70,38 +70,73 @@ class MiniWindow(QWidget):
         self.surface = QFrame()
         self.surface.setObjectName("miniSurface")
         window_layout.addWidget(self.surface)
-        layout = QVBoxLayout(self.surface); layout.setContentsMargins(12,8,9,8); layout.setSpacing(2)
-        row = QHBoxLayout()
+        layout = QVBoxLayout(self.surface); layout.setContentsMargins(10,7,8,7); layout.setSpacing(2)
+        row = QHBoxLayout(); row.setSpacing(4)
         self.mode = label("KRONOMETRE", "eyebrow"); row.addWidget(self.mode); row.addStretch()
         close = button("×", self.close, "link"); close.setAccessibleName("Yüzen pencereyi kapat")
         close.setToolTip("Yalnızca mini pencereyi kapat; sayaç çalışmaya devam eder")
-        close.setFixedSize(28, 28)
+        close.setFixedSize(26, 26)
         row.addWidget(close); layout.addLayout(row)
-        work_row = QHBoxLayout(); work_row.setSpacing(7)
-        self.work_label=label("ÇALIŞMA", "eyebrow"); work_row.addWidget(self.work_label)
-        self.time = label("00:00:00"); self.time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 28px; font-weight: 600;")
-        work_row.addWidget(self.time,1)
+
+        counters=QHBoxLayout(); counters.setSpacing(7)
+        self.work_panel=QWidget(); work=QVBoxLayout(self.work_panel)
+        work.setContentsMargins(0,0,0,0); work.setSpacing(2)
+        self.work_label=label("ÇALIŞMA", "eyebrow")
+        self.work_label.setAlignment(Qt.AlignmentFlag.AlignCenter); work.addWidget(self.work_label)
+        self.time = label("00:00:00")
+        self.time.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 18px; font-weight: 600;")
+        work.addWidget(self.time)
+        work_actions=QHBoxLayout(); work_actions.setSpacing(5); work_actions.addStretch()
         self.toggle = button("▶", owner.toggle_running, "primary")
         self.toggle.setAccessibleName("Çalışma sayacını başlat veya duraklat")
-        self.toggle.setFixedHeight(30); work_row.addWidget(self.toggle)
-        layout.addLayout(work_row)
-        desk_row = QHBoxLayout(); desk_row.setSpacing(7)
-        self.desk_label=label("MASA", "eyebrow"); desk_row.addWidget(self.desk_label)
-        self.desk_time = label("00:00:00"); self.desk_time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 18px; font-weight: 600;")
-        desk_row.addWidget(self.desk_time,1)
-        self.desk_toggle = button("Masadayım", owner.toggle_desk, "link")
+        self.toggle.setToolTip("Çalışma sayacını başlat veya duraklat")
+        self.toggle.setFixedSize(32,28); work_actions.addWidget(self.toggle)
+        self.work_reset = button("↺", owner.reset_current, "link")
+        self.work_reset.setAccessibleName("Çalışma sayacını sıfırla")
+        self.work_reset.setToolTip("Seçili çalışma sayacını sıfırla")
+        self.work_reset.setFixedSize(32,28); work_actions.addWidget(self.work_reset)
+        work_actions.addStretch(); work.addLayout(work_actions)
+        counters.addWidget(self.work_panel,1)
+
+        self.divider=QFrame(); self.divider.setObjectName("miniDivider")
+        self.divider.setFrameShape(QFrame.Shape.VLine); self.divider.setFixedWidth(1)
+        counters.addWidget(self.divider)
+
+        self.desk_panel=QWidget(); desk=QVBoxLayout(self.desk_panel)
+        desk.setContentsMargins(0,0,0,0); desk.setSpacing(2)
+        self.desk_label=label("MASA BAŞI", "eyebrow")
+        self.desk_label.setAlignment(Qt.AlignmentFlag.AlignCenter); desk.addWidget(self.desk_label)
+        self.desk_time = label("00:00:00")
+        self.desk_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.desk_time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 18px; font-weight: 600;")
+        desk.addWidget(self.desk_time)
+        desk_actions=QHBoxLayout(); desk_actions.setSpacing(5); desk_actions.addStretch()
+        self.desk_toggle = button("▶", owner.toggle_desk, "primary")
         self.desk_toggle.setAccessibleName("Masa başı sayacını başlat veya duraklat")
-        self.desk_toggle.setFixedHeight(28); desk_row.addWidget(self.desk_toggle)
-        layout.addLayout(desk_row)
+        self.desk_toggle.setToolTip("Masa başı sayacını başlat veya duraklat")
+        self.desk_toggle.setFixedSize(32,28); desk_actions.addWidget(self.desk_toggle)
+        self.desk_reset = button("↺", owner.reset_desk, "link")
+        self.desk_reset.setAccessibleName("Masa başı sayacını sıfırla")
+        self.desk_reset.setToolTip("Yalnızca görünen masa başı süresini sıfırla")
+        self.desk_reset.setFixedSize(32,28); desk_actions.addWidget(self.desk_reset)
+        for control in (self.toggle,self.work_reset,self.desk_toggle,self.desk_reset):
+            control.setStyleSheet("padding: 0; font-size: 16px;")
+        desk_actions.addStretch(); desk.addLayout(desk_actions)
+        counters.addWidget(self.desk_panel,1)
+        layout.addLayout(counters,1)
+
         row = QHBoxLayout()
-        self.state = label("Hazır", "muted"); row.addWidget(self.state); row.addStretch()
+        self.state = label("Hazır", "muted"); self.state.hide(); row.addStretch()
         self.grip = QSizeGrip(self.surface)
         self.grip.setAccessibleName("Mini pencereyi boyutlandır")
         self.grip.setToolTip("Küçültmek veya büyütmek için sürükle")
         row.addWidget(self.grip, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         layout.addLayout(row)
         self.setToolTip("Mini sayaç diğer uygulamaların üstünde kalır. Boş bir alandan sürükleyerek taşı.")
-        for draggable in (self.surface, self.mode, self.time, self.desk_time, self.state):
+        for draggable in (self.surface, self.mode, self.work_panel, self.work_label,
+                          self.time, self.desk_panel, self.desk_label,
+                          self.desk_time, self.divider):
             draggable.installEventFilter(self)
         self.resize(*initial_size)
 
@@ -115,19 +150,11 @@ class MiniWindow(QWidget):
 
     def resizeEvent(self, event):
         width = event.size().width()
-        font_size = 20 if width < 260 else 24 if width < 340 else 28
-        self.time.setStyleSheet(
-            f"font-family: 'Adwaita Mono'; font-size: {font_size}px; font-weight: 600;"
-        )
-        desk_font = 14 if width < 260 else 16 if width < 340 else 18
-        self.desk_time.setStyleSheet(
-            f"font-family: 'Adwaita Mono'; font-size: {desk_font}px; font-weight: 600;"
-        )
-        self.state.setVisible(width >= 275 and event.size().height() >= 155)
-        compact = width < 260
-        self.work_label.setText("İŞ" if compact else "ÇALIŞMA")
-        self.toggle.setFixedWidth(44 if compact else 105)
-        self.desk_toggle.setFixedWidth(44 if compact else 105)
+        font_size = 13 if width < 260 else 16 if width < 380 else 20
+        timer_style=f"font-family: 'Adwaita Mono'; font-size: {font_size}px; font-weight: 600;"
+        self.time.setStyleSheet(timer_style); self.desk_time.setStyleSheet(timer_style)
+        self.work_label.setText("İŞ" if width < 250 else "ÇALIŞMA")
+        self.desk_label.setText("MASA" if width < 250 else "MASA BAŞI")
         self.owner.preferences["mini_size"] = [event.size().width(), event.size().height()]
         super().resizeEvent(event)
 
@@ -141,11 +168,14 @@ class MiniWindow(QWidget):
         self.time.setText(clock_text(e.stopwatch_elapsed if e.mode=="stopwatch" else math.ceil(e.timer_remaining)))
         self.desk_time.setText(clock_text(e.desk_elapsed))
         self.state.setText("Mola zamanı" if e.state=="break" else "Çalışıyorsun" if e.state=="running" else "Duraklatıldı" if e.state=="paused" else "Başlamaya hazır")
-        wide = self.width() >= 330
-        self.toggle.setText(("Ⅱ  Duraklat" if e.state=="running" else "▶  Başlat") if wide else ("Ⅱ" if e.state=="running" else "▶"))
-        self.desk_toggle.setText(("Masadan ayrıl" if e.desk_active else "Masadayım") if wide else ("Ayrıl" if e.desk_active else "Masa"))
+        self.toggle.setText("Ⅱ" if e.state=="running" else "▶")
+        self.toggle.setToolTip("Çalışmayı duraklat" if e.state=="running" else "Çalışmayı başlat")
+        self.desk_toggle.setText("Ⅱ" if e.desk_active else "▶")
+        self.desk_toggle.setToolTip("Masadan ayrıl" if e.desk_active else "Masa başı sayacını başlat")
         self.toggle.setEnabled(e.state!="break")
         self.desk_toggle.setEnabled(e.state!="break")
+        self.work_reset.setEnabled(e.state!="break")
+        self.desk_reset.setEnabled(e.state!="break" and e.desk_elapsed>0)
 
 
 class SettingsWidget(QWidget):
@@ -318,7 +348,11 @@ class Window(QMainWindow):
         desk=QVBoxLayout(); desk.addWidget(label("MASA BAŞI", "eyebrow")); self.desk_time=label("00:00:00", "sectionTitle"); desk.addWidget(self.desk_time)
         self.desk_button=button("Masadayım",self.toggle_desk,"link")
         self.desk_button.setToolTip("Masa başı hatırlatmalarını çalışma sayacından bağımsız başlat veya durdur")
-        desk.addWidget(self.desk_button,alignment=Qt.AlignmentFlag.AlignLeft)
+        self.desk_reset=button("Sıfırla",self.reset_desk,"link")
+        self.desk_reset.setToolTip("Yalnızca görünen masa başı süresini sıfırla; hatırlatma ritmi korunur")
+        desk_actions=QHBoxLayout(); desk_actions.setSpacing(2)
+        desk_actions.addWidget(self.desk_button); desk_actions.addWidget(self.desk_reset)
+        desk.addLayout(desk_actions)
         stats.addLayout(left,2); stats.addLayout(middle,1); stats.addLayout(desk,2); box.addLayout(stats)
         columns.addWidget(focus,3)
         right=QVBoxLayout(); right.setSpacing(16)
@@ -414,6 +448,7 @@ class Window(QMainWindow):
         self.desk_time.setText(clock_text(e.desk_elapsed))
         self.desk_button.setText("Masadan ayrıl" if e.desk_active else "Masadayım")
         self.desk_button.setEnabled(e.state!="break")
+        self.desk_reset.setEnabled(e.state!="break" and e.desk_elapsed>0)
         self.today.setText(human_time(e.today_work)); self.breaks.setText(str(e.break_count))
         self.goal_remaining.setText(clock_text(math.ceil(e.remaining_goal)) if e.goal_enabled else human_time(math.ceil(e.remaining_goal/60)*60))
         self.goal_caption.setText("hedefin tamamlandı" if e.remaining_goal<=0 else "hedefine kalan süre / "+human_time(e.goal_seconds))
@@ -440,6 +475,10 @@ class Window(QMainWindow):
 
     def toggle_desk(self):
         self.engine.toggle_desk()
+        self.pulse(); self.save()
+
+    def reset_desk(self):
+        self.engine.reset_desk_elapsed()
         self.pulse(); self.save()
 
     def change_mode(self,mode):

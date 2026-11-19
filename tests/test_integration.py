@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QEvent, QTime, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QDialog, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QPushButton
 
 from mola.app import Window
 from mola.engine import Engine
@@ -224,6 +224,57 @@ class SessionDialogTests(unittest.TestCase):
         self.window.change_mode("timer")
         self.window.open_mini()
         self.assertEqual(mini.mode.text(), "ZAMANLAYICI")
+
+    def test_desk_reset_button_clears_only_visible_desk_time(self):
+        self.window.toggle_running()
+        self.work(12)
+        self.window.toggle_running()
+        before = self.engine.snapshot()
+        self.assertEqual(self.engine.desk_elapsed, 12)
+        self.assertTrue(self.window.desk_reset.isEnabled())
+
+        self.window.desk_reset.click()
+
+        self.assertEqual(self.engine.desk_elapsed, 0)
+        self.assertEqual(self.engine.today_work, before["today_work"])
+        self.assertEqual(self.engine.total_work, before["total_work"])
+        self.assertEqual(self.engine.stopwatch_elapsed, before["stopwatch_elapsed"])
+        self.assertEqual(self.engine.since_eye, before["since_eye"])
+        self.assertEqual(self.engine.since_movement, before["since_movement"])
+        self.assertEqual(self.engine.state, before["state"])
+        self.assertEqual(self.engine.desk_active, before["desk_active"])
+        self.assertEqual(self.window.desk_time.text(), "00:00:00")
+        self.assertEqual(self.store.data["engine"]["desk_elapsed"], 0)
+        self.assertFalse(self.window.desk_reset.isEnabled())
+
+    def test_mini_is_split_side_by_side_with_icon_only_counter_controls(self):
+        self.window.open_mini()
+        mini = self.window.mini
+        mini.resize(300, 145)
+        self.app.processEvents()
+
+        self.assertEqual(mini.divider.frameShape(), QFrame.Shape.VLine)
+        self.assertTrue(mini.divider.isVisible())
+        self.assertLess(mini.work_panel.geometry().center().x(), mini.divider.geometry().center().x())
+        self.assertLess(mini.divider.geometry().center().x(), mini.desk_panel.geometry().center().x())
+        self.assertGreater(mini.work_panel.geometry().height(), 0)
+        self.assertGreater(mini.desk_panel.geometry().height(), 0)
+
+        for control in (mini.toggle, mini.work_reset, mini.desk_toggle, mini.desk_reset):
+            with self.subTest(control=control.accessibleName()):
+                self.assertNotIn(control.text(), ("Başlat", "Duraklat", "Masadayım", "Masadan ayrıl"))
+                self.assertTrue(control.accessibleName())
+                self.assertLessEqual(len(control.text()), 2)
+
+        mini.toggle.click()
+        self.work(2)
+        self.assertEqual(self.engine.stopwatch_elapsed, 2)
+        self.assertEqual(self.engine.desk_elapsed, 2)
+        mini.desk_toggle.click()
+        self.assertFalse(self.engine.desk_active)
+        self.assertEqual(self.engine.state, "paused")
+        mini.desk_reset.click()
+        self.assertEqual(self.engine.desk_elapsed, 0)
 
     def test_work_pause_keeps_desk_cadence_until_explicit_desk_pause(self):
         self.engine.movement_interval = 60

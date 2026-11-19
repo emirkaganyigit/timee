@@ -33,6 +33,7 @@ A timer can measure a session, but it does not usually help with the surrounding
 - Timee keeps desk-presence time separate from stopwatch/countdown work time.
 - Starting focused work also marks the user as present at the desk, but pausing work does not pause or reset desk presence. A ten-minute nonworking pause at the desk therefore remains part of the reminder cadence.
 - Use the dedicated desk control when actually leaving or returning to the desk. Desk-away time advances neither eye nor movement reminders.
+- Use the desk counter's **Reset** control to return only its visible daily elapsed value to zero. Focused-work totals, stopwatch/countdown values, and eye/movement reminder cadence are preserved.
 - Eye and movement reminders use desk-presence time, while the daily work target and “today focused” total continue to use active work time only.
 - Desk and work controls are available independently in both the main window and mini timer.
 
@@ -41,8 +42,9 @@ A timer can measure a session, but it does not usually help with the surrounding
 - Open a compact floating view for either timer mode.
 - Drag the frameless surface to reposition it.
 - Resize it from the lower-right corner between `220 × 120` and `640 × 360` pixels; its last size is restored the next time it opens.
-- View both the selected work counter and desk-presence counter.
-- Start or pause work and change desk presence independently from the mini window.
+- View the selected work counter and desk-presence counter in equal side-by-side panes separated by a vertical divider.
+- Use the icon-only play/pause control in each pane to operate work and desk presence independently; textual action buttons are not shown in the mini view.
+- The compact icon controls retain descriptive accessible names and tooltips for keyboard and assistive-technology users.
 - Close only the mini window while leaving the timer and main application running.
 - No operating-system title bar, minimize button, or window close button is shown; the mini view uses its own compact controls.
 - On KDE Plasma, an exact-title KWin rule for `Timee · Mini sayaç` keeps only the Timee mini timer in the overlay layer, including above full-screen applications, and remembers its position.
@@ -359,6 +361,7 @@ The tests cover:
 - work-only accounting, daily target boundaries, and baseline-only goal-progress resets;
 - simultaneous and near-simultaneous reminders;
 - independently controlled work and desk-presence counters;
+- visible desk-counter resets that preserve work totals and reminder cadence;
 - completed, snoozed, acknowledged, skipped, closed, and manually opened break flows;
 - work pauses that preserve desk-based reminder cadence;
 - persisted reminder state without inferred offline work or desk time;
@@ -366,7 +369,7 @@ The tests cover:
 - system-suspend gaps and configurable 05:00-default day rollover;
 - save and restore behavior;
 - legacy Mola-to-Timee state migration;
-- mini-window controls sharing the main session;
+- split mini-window controls sharing the main session;
 - planner validation and overlap rules;
 - Unicode persistence, damaged files, and failed atomic replacement.
 
@@ -382,7 +385,7 @@ Offscreen Qt tests cannot prove real compositor stacking behavior. On KDE Plasma
 - The calm two-tone reminder cue is enabled by default and has its own setting.
 - Completion sound is optional and disabled by default.
 - Exercise instructions are available without relying on color alone.
-- The mini window retains explicit work, desk-presence, and close controls at compact sizes.
+- The mini window retains explicit icon-only work, desk-presence, and close controls at compact sizes; accessible names and tooltips provide the text equivalents.
 
 Timee has not yet undergone a formal WCAG or assistive-technology conformance audit. Accessibility feedback and platform-specific testing are welcome once a contribution policy and license are established.
 
