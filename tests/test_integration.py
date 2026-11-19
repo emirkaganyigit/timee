@@ -4,16 +4,16 @@ import copy
 from datetime import date
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QTime, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from mola.app import Window
 from mola.engine import Engine
-from mola.wellness import BreakDialog, SHORT_MOVEMENT_IDS, normalize_rotation
+from mola.wellness import BreakDialog, EYE_ORDERS, MOVEMENT_IDS, normalize_rotation
 
 
 class Clock:
@@ -50,6 +50,7 @@ class SessionDialogTests(unittest.TestCase):
         self.window = Window(store=self.store, engine=self.engine)
         self.window.ticker.stop()
         self.window.saver.stop()
+        self.window.preferences["reminder_sound"] = False
         self.time_patch = patch("mola.wellness.time.monotonic", self.clock)
         self.time_patch.start()
 
@@ -64,12 +65,20 @@ class SessionDialogTests(unittest.TestCase):
             self.clock.value += 1
             self.window.pulse()
 
-    def finish_step(self, dialog):
-        dialog.primary.click()
-        self.clock.value += dialog.duration
-        dialog.tick()
-        self.assertTrue(dialog.primary.isEnabled())
-        dialog.primary.click()
+    def complete_kind(self, dialog, kind):
+        """Run one selected reminder through its real timed dialog flow."""
+        if dialog.active_kind != kind:
+            dialog.kind_actions[kind]["start"].click()
+        self.assertEqual(dialog.active_kind, kind)
+        if dialog.started_at is None:
+            dialog.primary.click()
+        while dialog.outcomes[kind] is None:
+            duration = dialog.duration
+            self.clock.value += duration
+            dialog.tick()
+            if (dialog.outcomes[kind] is None and dialog.elapsed >= duration
+                    and dialog.primary.isEnabled()):
+                dialog.primary.click()
 
     def accept_goal_reset(self):
         """Accept the real confirmation dialog from its nested event loop."""
@@ -101,29 +110,33 @@ class SessionDialogTests(unittest.TestCase):
         dialog = self.window.break_dialog
         self.assertIsNotNone(dialog)
         self.assertEqual(self.engine.state, "break")
-        self.assertEqual(sum(duration for _, duration in dialog.steps), 330)
-        self.assertEqual([item["kind"] for item, _ in dialog.steps[:2]], ["eye", "eye"])
-        self.assertTrue(all(item["kind"] == "movement" for item, _ in dialog.steps[2:]))
-        for step in range(len(dialog.steps)):
-            self.assertEqual(dialog.step, step)
-            self.finish_step(dialog)
-            self.assertEqual(self.engine.today_work, 3)
-            if step < len(dialog.steps) - 1:
-                self.assertIs(self.window.break_dialog, dialog)
-                self.assertEqual(self.engine.state, "break")
-                self.assertEqual(self.engine.break_count, 0)
+        self.assertTrue(dialog.selector.isVisible())
+        self.assertTrue(dialog.kind_cards["eye"].isVisible())
+        self.assertTrue(dialog.kind_cards["movement"].isVisible())
+        self.assertLess(dialog.kind_cards["eye"].y(), dialog.kind_cards["movement"].y())
+        self.assertEqual(len([item for item, _ in dialog.steps if item["kind"] == "movement"]), 1)
+
+        # The user chooses movement first even though eye is listed first.
+        self.complete_kind(dialog, "movement")
+        self.assertIs(self.window.break_dialog, dialog)
+        self.assertTrue(dialog.kind_cards["eye"].isVisible())
+        self.assertEqual(self.engine.state, "break")
+        self.complete_kind(dialog, "eye")
+
         self.assertIsNone(self.window.break_dialog)
         self.assertEqual(self.engine.state, "running")
+        self.assertTrue(self.engine.desk_active)
         self.assertEqual(self.engine.today_work, 3)
         self.assertEqual(self.engine.break_count, 1)
         self.work(1)
         self.assertEqual(self.engine.today_work, 4)
+        self.assertEqual(self.engine.desk_elapsed, 4)
 
     def test_skip_and_window_close_resume_without_false_completion(self):
         self.engine.eye_interval = 3
         self.window.toggle_running()
         self.work(3)
-        self.window.break_dialog.skip.click()
+        self.window.break_dialog.kind_actions["eye"]["skip"].click()
         self.assertEqual(self.engine.state, "running")
         self.assertEqual(self.engine.break_count, 0)
         self.work(2)
@@ -165,6 +178,23 @@ class SessionDialogTests(unittest.TestCase):
         self.window.pulse()
         self.assertIs(self.window.break_dialog, first)
 
+    def test_new_break_event_plays_one_calm_combined_chime(self):
+        self.engine.eye_interval = 3
+        self.engine.movement_interval = 4
+        self.window.preferences["reminder_sound"] = True
+        self.window.play_reminder_chime = Mock()
+        self.window.toggle_running()
+        self.work(3)
+        self.window.play_reminder_chime.assert_called_once_with()
+        self.assertEqual(self.engine.pending_break, ("eye", "movement"))
+
+    def test_configurable_daily_reset_time_saves_from_settings(self):
+        self.window.settings.day_reset.setTime(QTime(4, 35))
+        self.window.settings.save_day_reset()
+        self.assertEqual(self.engine.day_reset_minutes, 4 * 60 + 35)
+        self.assertEqual(self.store.data["engine"]["day_reset_minutes"], 4 * 60 + 35)
+        self.assertIn("04:35", self.window.settings.day_saved.text())
+
     def test_mini_buttons_control_same_session_and_close_preserves_running(self):
         self.window.open_mini()
         mini = self.window.mini
@@ -175,9 +205,17 @@ class SessionDialogTests(unittest.TestCase):
         mini.toggle.click()
         self.work(2)
         self.assertEqual(self.engine.stopwatch_elapsed, 2)
+        self.assertEqual(self.engine.desk_elapsed, 2)
         mini.toggle.click()
         self.work(2)
         self.assertEqual(self.engine.stopwatch_elapsed, 2)
+        self.assertEqual(self.engine.desk_elapsed, 4)
+        self.assertTrue(self.engine.desk_active)
+        mini.desk_toggle.click()
+        self.assertFalse(self.engine.desk_active)
+        self.assertEqual(self.engine.state, "paused")
+        mini.desk_toggle.click()
+        self.assertTrue(self.engine.desk_active)
         mini.toggle.click()
         mini.close()
         self.assertEqual(self.engine.state, "running")
@@ -186,6 +224,25 @@ class SessionDialogTests(unittest.TestCase):
         self.window.change_mode("timer")
         self.window.open_mini()
         self.assertEqual(mini.mode.text(), "ZAMANLAYICI")
+
+    def test_work_pause_keeps_desk_cadence_until_explicit_desk_pause(self):
+        self.engine.movement_interval = 60
+        self.window.toggle_running()
+        self.work(30)
+        self.window.toggle_running()
+        self.assertEqual(self.engine.state, "paused")
+        self.assertTrue(self.engine.desk_active)
+        self.work(10)
+        self.assertEqual(self.engine.today_work, 30)
+        self.assertEqual(self.engine.desk_elapsed, 40)
+        self.assertEqual(self.engine.since_movement, 40)
+        self.assertEqual(self.engine.next_movement, 20)
+
+        self.window.toggle_desk()
+        self.work(10)
+        self.assertFalse(self.engine.desk_active)
+        self.assertEqual(self.engine.desk_elapsed, 40)
+        self.assertEqual(self.engine.next_movement, 20)
 
     def test_mini_accepts_small_resize_and_restores_saved_size(self):
         self.window.open_mini()
@@ -215,7 +272,7 @@ class SessionDialogTests(unittest.TestCase):
         self.engine.set_timer(3)
         self.engine.goal_enabled = True
         self.engine.goal_seconds = 3
-        self.engine.eye_interval = 3
+        self.engine.eye_interval = 100
         self.window.toggle_running()
         self.work(3)
         self.assertEqual(self.engine.state, "paused")
@@ -351,25 +408,47 @@ class SessionDialogTests(unittest.TestCase):
         dialog.primary.click()
         self.assertFalse(dialog.chooser.isEnabled())
 
-    def test_automatic_movement_sequences_short_exercises_and_screen_rest(self):
+    def test_automatic_movement_offers_one_exercise_and_can_snooze(self):
         self.engine.eye_enabled = False
         self.engine.movement_interval = 3
         self.window.toggle_running()
         self.work(3)
         dialog = self.window.break_dialog
+        self.assertEqual(len(dialog.steps), 1)
+        self.assertEqual(dialog.steps[0][0]["kind"], "movement")
+        self.assertTrue(dialog.selector.isVisible())
+        self.assertIn("snooze", dialog.kind_actions["movement"])
+        dialog.kind_actions["movement"]["snooze"].click()
+        self.assertIsNone(self.window.break_dialog)
+        self.assertEqual(self.engine.state, "running")
+        self.assertTrue(self.engine.desk_active)
+        self.assertEqual(self.engine.next_movement, 600)
+        self.assertEqual(self.engine.break_count, 0)
+        self.work(1)
+        self.assertEqual(self.engine.next_movement, 599)
+
+    def test_movement_acknowledgement_resets_normal_interval_and_counts_break(self):
+        self.engine.eye_enabled = False
+        self.engine.movement_interval = 30
+        self.window.toggle_running()
+        self.work(30)
+        dialog = self.window.break_dialog
+        dialog.kind_actions["movement"]["acknowledged"].click()
+        self.assertIsNone(self.window.break_dialog)
+        self.assertEqual(self.engine.state, "running")
+        self.assertEqual(self.engine.next_movement, 30)
+        self.assertEqual(self.engine.break_count, 1)
+
+    def test_automatic_movement_single_exercise_completes_and_resumes(self):
+        self.engine.eye_enabled = False
+        self.engine.movement_interval = 3
+        self.window.toggle_running()
+        self.work(3)
+        dialog = self.window.break_dialog
+        dialog.kind_actions["movement"]["start"].click()
         self.assertTrue(dialog.chooser.isHidden())
-        self.assertEqual(sum(duration for _, duration in dialog.steps), 300)
-        self.assertEqual(len(dialog.steps), 4)
-        self.assertEqual(len({item["id"] for item, _ in dialog.steps[:3]}), 3)
-        self.assertEqual(dialog.steps[-1][0]["id"], "screen_rest")
-        for index, (item, duration) in enumerate(dialog.steps):
-            self.assertEqual(dialog.item["id"], item["id"])
-            self.assertEqual(dialog.duration, duration)
-            self.assertTrue(dialog.chooser.isHidden())
-            self.finish_step(dialog)
-            if index < len(dialog.steps) - 1:
-                self.assertIs(self.window.break_dialog, dialog)
-                self.assertEqual(self.engine.state, "break")
+        self.assertEqual(len(dialog.steps), 1)
+        self.complete_kind(dialog, "movement")
         self.assertIsNone(self.window.break_dialog)
         self.assertEqual(self.engine.state, "running")
         self.assertEqual(self.engine.break_count, 1)
@@ -383,7 +462,7 @@ class SessionDialogTests(unittest.TestCase):
         first = self.window.break_dialog
         first_ids = [item["id"] for item, _ in first.steps]
         saved_rotation = copy.deepcopy(self.store.data["exercise_rotation"])
-        self.assertEqual(saved_rotation["movement"], 3)
+        self.assertEqual(saved_rotation["movement"], 1)
         self.assertEqual(saved_rotation["eye"], 0)
 
         self.window.open_break()
@@ -392,31 +471,42 @@ class SessionDialogTests(unittest.TestCase):
         self.assertIs(self.window.break_dialog, first)
         self.assertEqual(self.store.data["exercise_rotation"], saved_rotation)
 
-        first.skip.click()
+        first.kind_actions["movement"]["skip"].click()
         self.assertEqual(self.engine.break_count, 0)
         self.window.open_break()  # No pending break must not consume a routine.
         self.work(3)
         second = self.window.break_dialog
         second_ids = [item["id"] for item, _ in second.steps]
         self.assertNotEqual(first_ids[0], second_ids[0])
-        self.assertEqual(second_ids[0], SHORT_MOVEMENT_IDS[3])
-        self.assertEqual(self.store.data["exercise_rotation"]["movement"], 1)
+        self.assertEqual(second_ids[0], MOVEMENT_IDS[1])
+        self.assertEqual(self.store.data["exercise_rotation"]["movement"], 2)
         self.assertEqual(self.store.data["exercise_rotation"]["eye"], 0)
 
-    def test_eye_sequence_alternates_without_consuming_movement_rotation(self):
+    def test_eye_sequence_rotates_and_advances_without_next_click(self):
         self.engine.movement_enabled = False
         self.engine.eye_interval = 3
         self.window.toggle_running()
         self.work(3)
         first = self.window.break_dialog
-        self.assertEqual([item["id"] for item, _ in first.steps], ["distance", "blink"])
+        self.assertEqual(tuple(item["id"] for item, _ in first.steps), EYE_ORDERS[0])
         self.assertEqual(sum(duration for _, duration in first.steps), 30)
-        first.skip.click()
+        first.kind_actions["eye"]["start"].click()
+        first.primary.click()
+        self.assertTrue(first.animation.timer.isActive())
+        self.assertFalse(first.primary.isEnabled())
+        self.clock.value += first.duration
+        first.tick()
+        self.assertEqual(first.active_position, 1)
+        self.assertFalse(first.primary.isEnabled())
+        self.assertIs(self.window.break_dialog, first)
+        self.clock.value += first.duration
+        first.tick()
+        self.assertIsNone(self.window.break_dialog)
         self.work(3)
         second = self.window.break_dialog
-        self.assertEqual([item["id"] for item, _ in second.steps], ["blink", "distance"])
+        self.assertEqual(tuple(item["id"] for item, _ in second.steps), EYE_ORDERS[1])
         self.assertEqual(self.store.data["exercise_rotation"]["movement"], 0)
-        self.assertEqual(self.store.data["exercise_rotation"]["eye"], 0)
+        self.assertEqual(self.store.data["exercise_rotation"]["eye"], 2)
 
     def test_manual_exercise_does_not_consume_automatic_rotation(self):
         self.window.save()
@@ -425,7 +515,7 @@ class SessionDialogTests(unittest.TestCase):
         dialog = self.window.break_dialog
         self.assertEqual([item["id"] for item, _ in dialog.steps], ["shoulders"])
         self.assertFalse(dialog.chooser.isHidden())
-        self.finish_step(dialog)
+        self.complete_kind(dialog, "movement")
         self.assertEqual(self.engine.state, "idle")
         self.assertEqual(self.store.data["exercise_rotation"], before)
 
@@ -434,10 +524,10 @@ class SessionDialogTests(unittest.TestCase):
         self.engine.movement_interval = 3
         self.window.toggle_running()
         self.work(3)
-        self.window.break_dialog.skip.click()
+        self.window.break_dialog.kind_actions["movement"]["skip"].click()
         self.window.close()
         persisted = copy.deepcopy(self.store.data)
-        self.assertEqual(persisted["exercise_rotation"]["movement"], 3)
+        self.assertEqual(persisted["exercise_rotation"]["movement"], 1)
 
         restored_store = MemoryStore()
         restored_store.data = persisted
@@ -447,14 +537,15 @@ class SessionDialogTests(unittest.TestCase):
         restored = Window(store=restored_store, engine=restored_engine)
         restored.ticker.stop()
         restored.saver.stop()
+        restored.preferences["reminder_sound"] = False
         try:
             restored.toggle_running()
             for _ in range(3):
                 self.clock.value += 1
                 restored.pulse()
             self.assertIsNotNone(restored.break_dialog)
-            self.assertEqual(restored.break_dialog.steps[0][0]["id"], SHORT_MOVEMENT_IDS[3])
-            self.assertEqual(restored_store.data["exercise_rotation"]["movement"], 1)
+            self.assertEqual(restored.break_dialog.steps[0][0]["id"], MOVEMENT_IDS[1])
+            self.assertEqual(restored_store.data["exercise_rotation"]["movement"], 2)
         finally:
             restored.close()
             restored.deleteLater()
@@ -469,6 +560,7 @@ class SessionDialogTests(unittest.TestCase):
         recovered = Window(store=invalid_store, engine=recovered_engine)
         recovered.ticker.stop()
         recovered.saver.stop()
+        recovered.preferences["reminder_sound"] = False
         try:
             recovered.save()
             self.assertEqual(invalid_store.data["exercise_rotation"], normalize_rotation(None))
@@ -477,22 +569,22 @@ class SessionDialogTests(unittest.TestCase):
                 self.clock.value += 1
                 recovered.pulse()
             self.assertIsNotNone(recovered.break_dialog)
-            self.assertEqual(recovered.break_dialog.steps[0][0]["id"], SHORT_MOVEMENT_IDS[0])
+            self.assertEqual(recovered.break_dialog.steps[0][0]["id"], MOVEMENT_IDS[0])
         finally:
             recovered.close()
             recovered.deleteLater()
             QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
-    def test_skip_after_intermediate_step_resumes_without_completion_credit(self):
-        self.engine.eye_enabled = False
-        self.engine.movement_interval = 3
+    def test_combined_break_can_skip_both_independently(self):
+        self.engine.eye_interval = 3
+        self.engine.movement_interval = 4
         self.window.toggle_running()
         self.work(3)
         dialog = self.window.break_dialog
-        self.finish_step(dialog)
-        self.assertEqual(dialog.step, 1)
+        dialog.kind_actions["movement"]["skip"].click()
+        self.assertIs(self.window.break_dialog, dialog)
         self.assertEqual(self.engine.state, "break")
-        dialog.skip.click()
+        dialog.kind_actions["eye"]["skip"].click()
         self.assertEqual(self.engine.state, "running")
         self.assertEqual(self.engine.break_count, 0)
         self.assertEqual(self.engine.today_work, 3)

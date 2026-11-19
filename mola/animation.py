@@ -37,31 +37,56 @@ class ExerciseAnimation(QWidget):
         p.scale(scale, scale)
         accent, pale = QColor("#7dd3fc"), QColor("#315b85")
         t = math.sin(self.phase*1.6) if not self.reduced else .25
-        if self.kind in ("distance", "blink"):
-            if self.kind == "distance":
+        eye_distance_kinds = ("distance", "distance_window", "distance_room")
+        if self.kind in eye_distance_kinds + ("blink", "eyes_closed"):
+            if self.kind in eye_distance_kinds:
                 # A window and a distant landscape: look beyond the actual screen.
                 p.setPen(QPen(pale, 3))
                 p.setBrush(QColor("#0c1627"))
                 p.drawRoundedRect(QRectF(-130,-75,260,140),16,16)
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QColor("#d9c47f"))
-                p.drawEllipse(QPointF(72,-38),15,15)
+                glow = 15 + (2 * t if not self.reduced else 0)
+                p.drawEllipse(QPointF(72,-38),glow,glow)
                 path = QPainterPath(QPointF(-127,45))
                 path.cubicTo(-80,-25,-45,48,10,7)
                 path.cubicTo(64,-28,88,24,127,5)
                 path.lineTo(127,62); path.lineTo(-127,62)
                 p.setBrush(pale); p.drawPath(path)
+                # Slowly drifting clouds keep the cue visibly animated without
+                # asking the user to track an on-screen target.
+                cloud_x = -105 if self.reduced else ((self.phase * 18) % 290) - 145
+                p.setBrush(QColor("#8fb8d8"))
+                p.drawEllipse(QRectF(cloud_x,-53,34,13))
+                p.drawEllipse(QRectF(cloud_x+18,-58,28,18))
+                p.drawEllipse(QRectF(cloud_x+34,-52,31,12))
                 p.setPen(QPen(accent,3)); p.drawLine(QPointF(0,-72),QPointF(0,62))
                 p.drawLine(QPointF(-128,-6),QPointF(128,-6))
-                p.setFont(QFont("Adwaita Sans",12)); p.drawText(QRectF(-150,77,300,24),Qt.AlignmentFlag.AlignCenter,"Yaklaşık 6 metre uzağa bak")
+                captions = {
+                    "distance": "Yaklaşık 6 metre uzağa bak",
+                    "distance_window": "Pencerenin ötesinde sabit bir nokta seç",
+                    "distance_room": "Odadaki en uzak sabit noktaya bak",
+                }
+                p.setFont(QFont("Adwaita Sans",12)); p.drawText(
+                    QRectF(-170,77,340,24), Qt.AlignmentFlag.AlignCenter,
+                    captions[self.kind],
+                )
             else:
-                openness = max(.08, abs(math.cos(self.phase*.65))) if not self.reduced else 1
+                if self.kind == "eyes_closed":
+                    openness = max(.04, (math.cos(self.phase * .55) + 1) / 2) if not self.reduced else .08
+                else:
+                    openness = max(.08, abs(math.cos(self.phase*.65))) if not self.reduced else 1
                 p.setPen(QPen(accent,4)); p.setBrush(Qt.BrushStyle.NoBrush)
                 path = QPainterPath(QPointF(-83,0))
                 path.cubicTo(-35,-55*openness,35,-55*openness,83,0)
                 path.cubicTo(35,55*openness,-35,55*openness,-83,0)
-                p.drawPath(path); p.setBrush(accent)
-                p.drawEllipse(QRectF(-15,-15*openness,30,30*openness))
+                p.drawPath(path)
+                if self.kind == "blink":
+                    p.setBrush(accent)
+                    p.drawEllipse(QRectF(-15,-15*openness,30,30*openness))
+                else:
+                    p.setFont(QFont("Adwaita Sans",12))
+                    p.drawText(QRectF(-150,72,300,24),Qt.AlignmentFlag.AlignCenter,"Sıkmadan, baskı uygulamadan dinlendir")
         elif self.kind == "hands":
             p.setPen(QPen(accent,8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
             for side in (-1,1):

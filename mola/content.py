@@ -1,7 +1,7 @@
 """Kaynaklara dayalı mola içerikleri.
 
 ``duration`` animasyon/rehber süresidir; tıbbi egzersiz dozu değildir.
-Hareket seçenekleri beş dakikalık ekran dışı molanın içine yerleştirilir.
+Otomatik hareket hatırlatıcısı, kaynaklı havuzdan tek bir seçenek sunar.
 """
 
 SOURCES = [
@@ -14,8 +14,20 @@ SOURCES = [
     {
         "id": "aao",
         "title": "AAO · Dijital ekranlar ve göz yorgunluğu",
-        "url": "https://www.aao.org/eye-health/diseases/computer-usage",
+        "url": "https://www.aao.org/eye-health/glasses-contacts/computer-usage",
         "summary": "Ekran kullanımında göz kırpmayı hatırlamayı ve zaman zaman uzağa bakmayı önerir.",
+    },
+    {
+        "id": "osha",
+        "title": "OSHA · Ekran ve monitör ergonomisi",
+        "url": "https://www.osha.gov/etools/computer-workstations/components/monitors",
+        "summary": "Ekran çalışmasında sık göz kırpmayı ve düzenli olarak uzaktaki nesnelere odaklanmayı önerir.",
+    },
+    {
+        "id": "moorfields",
+        "title": "Moorfields NHS · Dijital göz yorgunluğunu azaltma",
+        "url": "https://www.moorfields.nhs.uk/private/about-moorfields-private/blog-articles/10-steps-for-digital-eye-strain-relief",
+        "summary": "Düzenli ekran aralarını, uzağa bakmayı ve gözleri kısa süre nazikçe kapatıp dinlendirmeyi önerir.",
     },
     {
         "id": "hse",
@@ -64,6 +76,39 @@ EXERCISES = [
         "reps": "Doğal ritminde",
         "instruction": "Bakışını ekrandan ayır ve gözlerini zorlamadan, normal biçimde kırp. Gözlerini sıkmana veya hızlı hızlı kırpmana gerek yok. Süre yalnızca kısa bir hatırlatmadır.",
         "source": "aao",
+        "place": "Her yerde",
+    },
+    {
+        "id": "distance_window",
+        "title": "Pencerenin ötesine bak",
+        "kind": "eye",
+        "animation": "distance_window",
+        "duration": 20,
+        "reps": "20 saniye · uzaktaki sabit bir nesne",
+        "instruction": "Ekrandan gözlerini ayır. Uygunsa pencereden yaklaşık 6 metre veya daha uzaktaki sabit bir nesneyi seç ve 20 saniye rahatça oraya bak. Animasyon yalnızca uzağa bakmayı hatırlatır; onu takip etmen gerekmez.",
+        "source": "aoa",
+        "place": "Pencere yakını / açık görüş alanı",
+    },
+    {
+        "id": "distance_room",
+        "title": "Odanın uzak noktasına bak",
+        "kind": "eye",
+        "animation": "distance_room",
+        "duration": 20,
+        "reps": "20 saniye · odadaki en uzak sabit nokta",
+        "instruction": "Pencere yoksa ekrandan gözlerini ayır ve odadaki en uzak sabit noktayı seç. Yaklaşık 20 saniye rahatça oraya bak; gözlerini zorlamadan doğal biçimde kırp.",
+        "source": "osha",
+        "place": "Ofis / kütüphane",
+    },
+    {
+        "id": "eyes_closed",
+        "title": "Gözlerini nazikçe kapat",
+        "kind": "eye",
+        "animation": "eyes_closed",
+        "duration": 10,
+        "reps": "10 saniye · baskı uygulamadan",
+        "instruction": "Başını rahat tut, göz kapaklarını sıkmadan nazikçe kapat ve kısa süre dinlendir. Gözlerine dokunma veya baskı uygulama. Rahatsızlık hissedersen gözlerini aç.",
+        "source": "moorfields",
         "place": "Her yerde",
     },
     {

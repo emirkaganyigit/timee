@@ -7,12 +7,13 @@ import os
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QEvent, QLockFile, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QLockFile, QTime, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QDialog, QFrame, QHBoxLayout,
     QMainWindow, QMessageBox, QProgressBar, QScrollArea, QSpinBox, QLayout,
-    QSizeGrip, QStackedWidget, QVBoxLayout, QWidget,
+    QSizeGrip, QStackedWidget, QTimeEdit, QVBoxLayout, QWidget,
 )
 
 from .animation import TimerDial
@@ -22,8 +23,8 @@ from .planner import DAYS, PlannerWidget
 from .storage import Store
 from .theme import apply_theme, button, card, clock_text, human_time, label
 from .wellness import (
-    BreakDialog, EXERCISE_MAP, LibraryWidget, normalize_rotation,
-    plan_automatic_break,
+    BreakDialog, EXERCISE_MAP, LibraryWidget, MOVEMENT_SNOOZE_SECONDS,
+    normalize_rotation, plan_automatic_break,
 )
 
 MONTHS = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
@@ -69,25 +70,38 @@ class MiniWindow(QWidget):
         self.surface = QFrame()
         self.surface.setObjectName("miniSurface")
         window_layout.addWidget(self.surface)
-        layout = QVBoxLayout(self.surface); layout.setContentsMargins(14,10,10,9); layout.setSpacing(3)
+        layout = QVBoxLayout(self.surface); layout.setContentsMargins(12,8,9,8); layout.setSpacing(2)
         row = QHBoxLayout()
         self.mode = label("KRONOMETRE", "eyebrow"); row.addWidget(self.mode); row.addStretch()
         close = button("×", self.close, "link"); close.setAccessibleName("Yüzen pencereyi kapat")
         close.setToolTip("Yalnızca mini pencereyi kapat; sayaç çalışmaya devam eder")
         close.setFixedSize(28, 28)
         row.addWidget(close); layout.addLayout(row)
-        self.time = label("00:00:00"); self.time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 36px; font-weight: 600;")
-        layout.addWidget(self.time)
+        work_row = QHBoxLayout(); work_row.setSpacing(7)
+        self.work_label=label("ÇALIŞMA", "eyebrow"); work_row.addWidget(self.work_label)
+        self.time = label("00:00:00"); self.time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 28px; font-weight: 600;")
+        work_row.addWidget(self.time,1)
+        self.toggle = button("▶", owner.toggle_running, "primary")
+        self.toggle.setAccessibleName("Çalışma sayacını başlat veya duraklat")
+        self.toggle.setFixedHeight(30); work_row.addWidget(self.toggle)
+        layout.addLayout(work_row)
+        desk_row = QHBoxLayout(); desk_row.setSpacing(7)
+        self.desk_label=label("MASA", "eyebrow"); desk_row.addWidget(self.desk_label)
+        self.desk_time = label("00:00:00"); self.desk_time.setStyleSheet("font-family: 'Adwaita Mono'; font-size: 18px; font-weight: 600;")
+        desk_row.addWidget(self.desk_time,1)
+        self.desk_toggle = button("Masadayım", owner.toggle_desk, "link")
+        self.desk_toggle.setAccessibleName("Masa başı sayacını başlat veya duraklat")
+        self.desk_toggle.setFixedHeight(28); desk_row.addWidget(self.desk_toggle)
+        layout.addLayout(desk_row)
         row = QHBoxLayout()
         self.state = label("Hazır", "muted"); row.addWidget(self.state); row.addStretch()
-        self.toggle = button("Başlat", owner.toggle_running, "primary"); row.addWidget(self.toggle)
         self.grip = QSizeGrip(self.surface)
         self.grip.setAccessibleName("Mini pencereyi boyutlandır")
         self.grip.setToolTip("Küçültmek veya büyütmek için sürükle")
         row.addWidget(self.grip, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         layout.addLayout(row)
         self.setToolTip("Mini sayaç diğer uygulamaların üstünde kalır. Boş bir alandan sürükleyerek taşı.")
-        for draggable in (self.surface, self.mode, self.time, self.state):
+        for draggable in (self.surface, self.mode, self.time, self.desk_time, self.state):
             draggable.installEventFilter(self)
         self.resize(*initial_size)
 
@@ -101,11 +115,19 @@ class MiniWindow(QWidget):
 
     def resizeEvent(self, event):
         width = event.size().width()
-        font_size = 24 if width < 260 else 30 if width < 340 else 36
+        font_size = 20 if width < 260 else 24 if width < 340 else 28
         self.time.setStyleSheet(
             f"font-family: 'Adwaita Mono'; font-size: {font_size}px; font-weight: 600;"
         )
-        self.state.setVisible(width >= 275)
+        desk_font = 14 if width < 260 else 16 if width < 340 else 18
+        self.desk_time.setStyleSheet(
+            f"font-family: 'Adwaita Mono'; font-size: {desk_font}px; font-weight: 600;"
+        )
+        self.state.setVisible(width >= 275 and event.size().height() >= 155)
+        compact = width < 260
+        self.work_label.setText("İŞ" if compact else "ÇALIŞMA")
+        self.toggle.setFixedWidth(44 if compact else 105)
+        self.desk_toggle.setFixedWidth(44 if compact else 105)
         self.owner.preferences["mini_size"] = [event.size().width(), event.size().height()]
         super().resizeEvent(event)
 
@@ -117,9 +139,13 @@ class MiniWindow(QWidget):
         e=self.owner.engine
         self.mode.setText("KRONOMETRE" if e.mode=="stopwatch" else "ZAMANLAYICI")
         self.time.setText(clock_text(e.stopwatch_elapsed if e.mode=="stopwatch" else math.ceil(e.timer_remaining)))
+        self.desk_time.setText(clock_text(e.desk_elapsed))
         self.state.setText("Mola zamanı" if e.state=="break" else "Çalışıyorsun" if e.state=="running" else "Duraklatıldı" if e.state=="paused" else "Başlamaya hazır")
-        self.toggle.setText("Duraklat" if e.state=="running" else "Başlat")
+        wide = self.width() >= 330
+        self.toggle.setText(("Ⅱ  Duraklat" if e.state=="running" else "▶  Başlat") if wide else ("Ⅱ" if e.state=="running" else "▶"))
+        self.desk_toggle.setText(("Masadan ayrıl" if e.desk_active else "Masadayım") if wide else ("Ayrıl" if e.desk_active else "Masa"))
         self.toggle.setEnabled(e.state!="break")
+        self.desk_toggle.setEnabled(e.state!="break")
 
 
 class SettingsWidget(QWidget):
@@ -128,7 +154,7 @@ class SettingsWidget(QWidget):
         self.owner = owner
         outer = QVBoxLayout(self); outer.setContentsMargins(0,0,0,0); outer.setSpacing(16)
         outer.addWidget(label("Ritmini kendin belirle.", "title"))
-        outer.addWidget(label("Kısa molalar, sessiz hatırlatmalar ve sana uygun bir çalışma günü.", "muted", True))
+        outer.addWidget(label("Kısa molalar, sakin hatırlatmalar ve sana uygun bir çalışma günü.", "muted", True))
         scroll=QScrollArea(); scroll.setWidgetResizable(True)
         content=QWidget(); layout=QVBoxLayout(content); layout.setContentsMargins(0,4,8,8); layout.setSpacing(16)
         frame,box=card(); box.addWidget(label("Mola düzeni", "sectionTitle"))
@@ -140,19 +166,32 @@ class SettingsWidget(QWidget):
         self.movement_minutes.setAccessibleName("Hareket molası sıklığı")
         for check,spin in ((self.eye,self.eye_minutes),(self.movement,self.movement_minutes)):
             row=QHBoxLayout(); row.addWidget(check,1); row.addWidget(spin); box.addLayout(row)
-        box.addWidget(label("Önerilen başlangıç: kesintisiz 20 dakikada göz molası; 60 dakikada 5 dakika hareket. Yakın molalar birleşir. Kısa duraklamalarda süre ilerlemez; 5 dakika veya daha uzun duraklama yeni bir çalışma periyodu başlatır.","muted",True))
+        box.addWidget(label("Önerilen başlangıç: 20 dakika masa başında göz molası; 60 dakika masa başında hareket hatırlatması. Çalışma sayacını durdurmak bu süreleri sıfırlamaz; gerçekten ayrıldığında Masa başı kontrolünü durdurabilirsin.","muted",True))
         save=button("Mola düzenini kaydet", self.save_intervals,"primary"); box.addWidget(save,alignment=Qt.AlignmentFlag.AlignLeft)
         self.saved=label("", "hint"); box.addWidget(self.saved)
         layout.addWidget(frame)
+        frame,box=card(); box.addWidget(label("Günlük kayıt sınırı", "sectionTitle"))
+        row=QHBoxLayout(); row.addWidget(label("Yeni günün başladığı saat", ""),1)
+        self.day_reset=QTimeEdit(); self.day_reset.setDisplayFormat("HH:mm")
+        self.day_reset.setTime(QTime(owner.engine.day_reset_minutes//60, owner.engine.day_reset_minutes%60))
+        self.day_reset.setAccessibleName("Günlük çalışma hedefinin sıfırlanma saati")
+        row.addWidget(self.day_reset); box.addLayout(row)
+        box.addWidget(label("Bugünkü çalışma, masa başı süresi, hedef ilerlemesi ve tamamlanan mola sayısı bu saatte yeni güne geçer. Varsayılan 05:00'tir.","muted",True))
+        save_day=button("Gün sınırını kaydet", self.save_day_reset,"primary")
+        box.addWidget(save_day,alignment=Qt.AlignmentFlag.AlignLeft)
+        self.day_saved=label("", "hint"); box.addWidget(self.day_saved)
+        layout.addWidget(frame)
         frame,box=card(); box.addWidget(label("Sakin bir deneyim", "sectionTitle"))
         self.reduced=QCheckBox("Animasyonları azalt"); self.reduced.setChecked(owner.preferences["reduced_motion"])
+        self.reminder_sound=QCheckBox("Mola uyarısında sakin çift bildirim sesi çal"); self.reminder_sound.setChecked(owner.preferences["reminder_sound"])
         self.sound=QCheckBox("Egzersiz süresi dolunca kısa ses çal"); self.sound.setChecked(owner.preferences["sound"])
         self.reduced.toggled.connect(lambda checked:self.preference("reduced_motion",checked))
+        self.reminder_sound.toggled.connect(lambda checked:self.preference("reminder_sound",checked))
         self.sound.toggled.connect(lambda checked:self.preference("sound",checked))
-        box.addWidget(self.reduced); box.addWidget(self.sound)
-        box.addWidget(label("Varsayılan deneyim sessizdir; kütüphanede de kullanabilirsin. Tüm kayıtlar bu bilgisayarda kalır.","muted",True)); layout.addWidget(frame)
+        box.addWidget(self.reduced); box.addWidget(self.reminder_sound); box.addWidget(self.sound)
+        box.addWidget(label("Mola uyarısı, ekrana bakmıyorken de fark edebilmen için varsayılan olarak iki yumuşak ton çalar. Tüm kayıtlar bu bilgisayarda kalır.","muted",True)); layout.addWidget(frame)
         frame,box=card(); box.addWidget(label("Kaynaklar ve yaklaşım", "sectionTitle"))
-        box.addWidget(label("Sıklıklar herkes için kesin tıbbi sınırlar değildir. 20–20–20 bir kurum önerisidir; hareket için 60 dakika / 5 dakika, rehbere dayalı başlangıç ayarıdır. İhtiyacına göre değiştirebilirsin.","muted",True))
+        box.addWidget(label("Sıklıklar herkes için kesin tıbbi sınırlar değildir. 20–20–20 bir kurum önerisidir; 60 dakikalık hareket aralığı HSE'nin 5–10 dakikalık ekran molası örneğinden esinlenen bir başlangıç ayarıdır. Tek hareket önerisi bu molanın tamamı sayılmaz.","muted",True))
         for source in SOURCES:
             link=button(source["title"]+"  ↗",lambda checked=False,url=source["url"]:QDesktopServices.openUrl(QUrl(url)),"link")
             link.setStyleSheet("text-align: left; padding-left: 0;")
@@ -161,6 +200,8 @@ class SettingsWidget(QWidget):
 
     def preference(self, key, checked):
         self.owner.preferences[key]=checked; self.owner.save()
+        if key == "reminder_sound" and checked:
+            self.owner.prepare_reminder_chime()
 
     def save_intervals(self):
         self.owner.pulse()
@@ -170,6 +211,12 @@ class SettingsWidget(QWidget):
         e.since_eye=e.since_movement=0
         self.owner.save(); self.owner.refresh()
         self.saved.setText("Kaydedildi. Yeni mola aralıkları şimdi başlıyor.")
+
+    def save_day_reset(self):
+        value=self.day_reset.time()
+        self.owner.engine.set_day_reset(value.hour()*60+value.minute())
+        self.owner.pulse(); self.owner.save()
+        self.day_saved.setText(f"Kaydedildi. Günlük kayıtlar {value.toString('HH:mm')} saatinde yenilenir.")
 
 
 class Window(QMainWindow):
@@ -189,8 +236,12 @@ class Window(QMainWindow):
         self.preferences={
             "reduced_motion": prefs.get("reduced_motion") is True,
             "sound": prefs.get("sound") is True,
+            "reminder_sound": prefs.get("reminder_sound") is not False,
             "mini_size": mini_size,
         }
+        self.reminder_chime=None
+        if self.preferences["reminder_sound"] and os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            self.prepare_reminder_chime()
         self.exercise_rotation = normalize_rotation(data.get("exercise_rotation"))
         self.break_dialog=None
         self.mini=None
@@ -263,8 +314,12 @@ class Window(QMainWindow):
         line=QFrame(); line.setObjectName("separator"); line.setFixedHeight(1); box.addWidget(line)
         stats=QHBoxLayout()
         left=QVBoxLayout(); left.addWidget(label("BUGÜN ODAKLANDIN", "eyebrow")); self.today=label("0 dk","number"); left.addWidget(self.today)
-        right=QVBoxLayout(); right.addWidget(label("TAMAMLANAN MOLA", "eyebrow")); self.breaks=label("0","number"); right.addWidget(self.breaks)
-        stats.addLayout(left,1); stats.addLayout(right,1); box.addLayout(stats)
+        middle=QVBoxLayout(); middle.addWidget(label("TAMAMLANAN MOLA", "eyebrow")); self.breaks=label("0","number"); middle.addWidget(self.breaks)
+        desk=QVBoxLayout(); desk.addWidget(label("MASA BAŞI", "eyebrow")); self.desk_time=label("00:00:00", "sectionTitle"); desk.addWidget(self.desk_time)
+        self.desk_button=button("Masadayım",self.toggle_desk,"link")
+        self.desk_button.setToolTip("Masa başı hatırlatmalarını çalışma sayacından bağımsız başlat veya durdur")
+        desk.addWidget(self.desk_button,alignment=Qt.AlignmentFlag.AlignLeft)
+        stats.addLayout(left,2); stats.addLayout(middle,1); stats.addLayout(desk,2); box.addLayout(stats)
         columns.addWidget(focus,3)
         right=QVBoxLayout(); right.setSpacing(16)
         goal,box=card("softCard",18); box.setSpacing(8)
@@ -281,15 +336,15 @@ class Window(QMainWindow):
         box.addWidget(label("İki sayaç da bugünkü aktif çalışmana sayılır.","hint",True)); right.addWidget(goal)
         reminders,box=card(margins=18); box.setSpacing(6); box.addWidget(label("Sıradaki molalar", "sectionTitle"))
         self.eye_next=label("20 dk sonra","sectionTitle"); self.move_next=label("60 dk sonra","sectionTitle")
-        for title,info,widget in (("GÖZLERİNE BİR ARA","20 saniye uzağa bakış",self.eye_next),("BİRAZ HAREKET","5 dakikalık ekran dışı mola",self.move_next)):
+        for title,info,widget in (("GÖZLERİNE BİR ARA","20 saniye uzağa bakış",self.eye_next),("BİRAZ HAREKET","tek hareket · 10 dk erteleme",self.move_next)):
             box.addWidget(label(title,"eyebrow")); box.addWidget(widget); box.addWidget(label(info,"hint"))
-        box.addWidget(label("Çakışan molalar tek pencerede birleşir.","muted",True)); right.addWidget(reminders)
+        box.addWidget(label("Molalar masa başı sürene göre ilerler. Çakışırlarsa ikisini aynı pencerede görüp sırayı sen seçersin.","muted",True)); right.addWidget(reminders)
         plan,box=card(margins=18); box.setSpacing(8); box.addWidget(label("Şimdi planında", "eyebrow"))
         self.current_task=label("Kendine bir odak alanı seç.","sectionTitle",True); box.addWidget(self.current_task)
         self.current_time=label("Haftana küçük bir plan ekle.","muted",True); box.addWidget(self.current_time)
         box.addWidget(button("Haftalık planı aç  →",lambda:self.navigate(1),"link")); right.addWidget(plan)
         right.addStretch(); columns.addLayout(right,2); layout.addLayout(columns,1)
-        footer=QHBoxLayout(); footer.addWidget(label("Mola zamanı, çalışma sürene eklenmez.","hint")); footer.addStretch()
+        footer=QHBoxLayout(); footer.addWidget(label("Çalışma ve masa başı süreleri ayrıdır; mola zamanı aktif çalışma sürene eklenmez.","hint")); footer.addStretch()
         footer.addWidget(button("Mola düzeni ve kaynaklar  ↗",lambda:self.navigate(3),"link")); layout.addLayout(footer)
         return page
 
@@ -315,6 +370,7 @@ class Window(QMainWindow):
     def pulse(self):
         events=self.engine.tick()
         if "break" in events:
+            self.play_reminder_chime()
             self.open_break()
         if "goal_done" in events:
             self.show_notice("Bugünkü hedefine ulaştın.","Aktif çalışma hedefin tamamlandı. Yeni bir hedef belirleyebilir ya da hedefte durmayı kapatabilirsin.","goal")
@@ -324,11 +380,27 @@ class Window(QMainWindow):
             self.show_banner("Uzun bir kesinti algılandı; sayaç duraklatıldı. Hazır olduğunda Başlat ile devam et.")
         self.refresh()
 
+    def play_reminder_chime(self):
+        if not self.preferences["reminder_sound"]:
+            return
+        self.prepare_reminder_chime()
+        self.reminder_chime.play()
+
+    def prepare_reminder_chime(self):
+        if self.reminder_chime is None:
+            effect=QSoundEffect(self)
+            sound_path=Path(__file__).with_name("assets") / "reminder-chime.wav"
+            effect.setSource(QUrl.fromLocalFile(str(sound_path)))
+            effect.setVolume(0.22)
+            self.reminder_chime=effect
+
     def refresh(self):
         e=self.engine
         now=datetime.now()
         self.date_label.setText(f"{now.day} {MONTHS[now.month-1].upper()} {now.year}  /  {DAYS[now.weekday()].upper()}")
         status={"idle":"Başlamaya hazır","paused":"Duraklatıldı","running":"Odak zamanı","break":"Kısa bir mola"}[e.state]
+        if e.state in ("idle","paused") and e.desk_active:
+            status="Masa başı süresi açık"
         self.status.setText("●  "+status)
         self.mode_buttons[e.mode].setChecked(True)
         duration=e.stopwatch_elapsed if e.mode=="stopwatch" else math.ceil(e.timer_remaining)
@@ -339,13 +411,16 @@ class Window(QMainWindow):
         self.start_button.setText("Ⅱ   Duraklat" if e.state=="running" else "▶   Devam et" if e.state=="paused" else "▶   Başlat")
         self.start_button.setEnabled(e.state!="break")
         self.reset_button.setEnabled(e.state!="break")
+        self.desk_time.setText(clock_text(e.desk_elapsed))
+        self.desk_button.setText("Masadan ayrıl" if e.desk_active else "Masadayım")
+        self.desk_button.setEnabled(e.state!="break")
         self.today.setText(human_time(e.today_work)); self.breaks.setText(str(e.break_count))
         self.goal_remaining.setText(clock_text(math.ceil(e.remaining_goal)) if e.goal_enabled else human_time(math.ceil(e.remaining_goal/60)*60))
         self.goal_caption.setText("hedefin tamamlandı" if e.remaining_goal<=0 else "hedefine kalan süre / "+human_time(e.goal_seconds))
         self.goal_progress.setValue(min(1000,int(1000*e.goal_work/e.goal_seconds)))
         self.goal_reset.setEnabled(e.goal_work > 0 and e.state != "break")
-        self.eye_next.setText(f"{math.ceil(e.next_eye/60)} dk çalışma sonrası" if e.eye_enabled else "Hatırlatma kapalı")
-        self.move_next.setText(f"{math.ceil(e.next_movement/60)} dk çalışma sonrası" if e.movement_enabled else "Hatırlatma kapalı")
+        self.eye_next.setText(f"{math.ceil(e.next_eye/60)} dk masa başı süresi sonrası" if e.eye_enabled else "Hatırlatma kapalı")
+        self.move_next.setText(f"{math.ceil(e.next_movement/60)} dk masa başı süresi sonrası" if e.movement_enabled else "Hatırlatma kapalı")
         if hasattr(self,"planner"):
             task=self.planner.current_task()
             self.current_task.setText(task["title"] if task else "Şu an için serbest alan.")
@@ -361,6 +436,10 @@ class Window(QMainWindow):
             self.show_banner(GOAL_COMPLETE_BANNER)
         else:
             self.banner.hide()
+        self.pulse(); self.save()
+
+    def toggle_desk(self):
+        self.engine.toggle_desk()
         self.pulse(); self.save()
 
     def change_mode(self,mode):
@@ -440,15 +519,23 @@ class Window(QMainWindow):
             kinds, self, exercise, self.preferences["reduced_motion"],
             self.preferences["sound"], planned_steps,
         )
-        self.break_dialog.completed.connect(self.finish_break)
+        self.break_dialog.resolved.connect(self.finish_break)
         self.break_dialog.show(); self.break_dialog.raise_(); self.break_dialog.activateWindow()
         QApplication.alert(self,0)
         self.refresh(); self.save()
 
-    def finish_break(self,completed):
+    def finish_break(self,outcomes):
         dialog=self.break_dialog
         self.break_dialog=None
-        self.engine.finish_break(completed)
+        for kind,outcome in outcomes.items():
+            if outcome == "completed":
+                self.engine.finish_break(True,(kind,))
+            elif outcome == "skipped":
+                self.engine.finish_break(False,(kind,))
+            elif kind == "movement" and outcome == "snoozed":
+                self.engine.snooze_movement(MOVEMENT_SNOOZE_SECONDS)
+            elif kind == "movement" and outcome == "acknowledged":
+                self.engine.acknowledge_movement()
         if dialog:
             dialog.deleteLater()
         self.refresh(); self.save()
@@ -483,9 +570,10 @@ class Window(QMainWindow):
 
     def closeEvent(self,event):
         self.closing=True; self.pending_notice=None
-        self.ticker.stop(); self.saver.stop(); self.engine.pause()
+        self.ticker.stop(); self.saver.stop()
         if self.break_dialog:
             self.break_dialog.finish(False)
+        self.engine.pause_desk()
         if self.mini:
             self.mini.close()
         self.save(); event.accept()

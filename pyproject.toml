@@ -22,3 +22,6 @@ timee = "mola.app:main"
 
 [tool.setuptools]
 packages = ["mola"]
+
+[tool.setuptools.package-data]
+mola = ["assets/*.wav"]

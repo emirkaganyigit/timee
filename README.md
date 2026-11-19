@@ -11,6 +11,7 @@ The interface is currently in Turkish. This README is written in English for use
 A timer can measure a session, but it does not usually help with the surrounding workday. Timee treats focused work, short recovery breaks, movement, and planning as parts of the same flow:
 
 - it counts only active work time;
+- it tracks desk-presence time independently from focused work;
 - it pauses the active counter when a break reminder opens;
 - it resumes only when the counter had been running before the break;
 - it combines reminders that would otherwise appear close together;
@@ -27,29 +28,38 @@ A timer can measure a session, but it does not usually help with the surrounding
 - A completed countdown remains paused and can be started again as a new session.
 - System suspend and long event-loop interruptions are not credited as work time. On Linux, Timee uses `CLOCK_BOOTTIME` when available so a suspend gap can be detected.
 
+### Independent desk-presence clock
+
+- Timee keeps desk-presence time separate from stopwatch/countdown work time.
+- Starting focused work also marks the user as present at the desk, but pausing work does not pause or reset desk presence. A ten-minute nonworking pause at the desk therefore remains part of the reminder cadence.
+- Use the dedicated desk control when actually leaving or returning to the desk. Desk-away time advances neither eye nor movement reminders.
+- Eye and movement reminders use desk-presence time, while the daily work target and “today focused” total continue to use active work time only.
+- Desk and work controls are available independently in both the main window and mini timer.
+
 ### Resizable mini timer
 
 - Open a compact floating view for either timer mode.
 - Drag the frameless surface to reposition it.
 - Resize it from the lower-right corner between `220 × 120` and `640 × 360` pixels; its last size is restored the next time it opens.
-- Start or pause the shared session directly from the mini window.
+- View both the selected work counter and desk-presence counter.
+- Start or pause work and change desk presence independently from the mini window.
 - Close only the mini window while leaving the timer and main application running.
 - No operating-system title bar, minimize button, or window close button is shown; the mini view uses its own compact controls.
 - On KDE Plasma, an exact-title KWin rule for `Timee · Mini sayaç` keeps only the Timee mini timer in the overlay layer, including above full-screen applications, and remembers its position.
 
-The main window and the mini window are two views of the same session. Opening or closing the mini view never creates a second timer.
+The main window and the mini window are two views of the same work and desk session. Opening or closing the mini view never creates duplicate counters.
 
 ### Eye-rest reminders
 
-The default eye reminder becomes due after 20 minutes in the current work period. Every automatic eye flow retains the source-backed step of looking away from the display at a real object approximately 6 metres (20 feet) away for 20 seconds. It also includes a 10-second natural-blinking cue, alternating the order between distance → blink and blink → distance on successive flows. The complete automatic eye flow is 30 seconds; the verified 20-second distance step is never shortened or omitted.
+The default eye reminder becomes due after 20 minutes of desk-presence time. Every automatic eye flow retains a source-backed step of looking away from the display at a real object approximately 6 metres (20 feet) away for 20 seconds. Room, window, and general distant-object prompts rotate for variety. A 10-second natural-blinking or gentle eyes-closed cue accompanies the distant-view step, so a complete automatic eye flow remains 30 seconds.
 
-The animation explains each activity. During the distance step, users are not asked to track an on-screen object and do not need to keep looking at the display.
+Once started, consecutive eye steps advance automatically; the user does not need to press a Next button between them. The animation continues moving throughout the timed cue, but distance steps never ask users to track an on-screen object or keep looking at the display.
 
 The interval can be enabled, disabled, or changed in Settings.
 
 ### Movement reminders
 
-The default movement reminder becomes due after 60 minutes in the current work period. Each automatic movement flow selects three source-backed short exercises from a rotating pool, then uses the remaining time for a screen-away remainder. The exercises and remainder together always total exactly five minutes.
+The default movement reminder becomes due after 60 minutes of desk-presence time. Each automatic movement reminder selects one source-backed activity from a rotating pool instead of chaining several movements.
 
 The rotating short-exercise pool includes:
 
@@ -59,26 +69,26 @@ The rotating short-exercise pool includes:
 - shoulder rolls;
 - opening and closing the hands.
 
-The library also offers a standalone five-minute walk, screen-away task, or posture-change activity. Movement guidance includes an instruction to stay within a comfortable range and stop if pain occurs. The three short guided movements are components of the automatic five-minute break; they do not replace its screen-away remainder.
+The library also offers a standalone five-minute walk, screen-away task, or posture-change activity. Movement guidance includes an instruction to stay within a comfortable range and stop if pain occurs. A short guided activity is a prompt to change position; it is not presented as equivalent to every user's full screen-away break.
 
 ![Timee rotating movement break](docs/screenshots-timee/movement-break.png)
 
 ### Calm reminder scheduling
 
-- Reminder cadence measures active time in the current uninterrupted-work period and advances only while a counter is running.
-- A manual pause shorter than five minutes is treated as a frozen continuation of that work period. When work resumes, the countdown continues from where it stopped; other nonworking time likewise does not advance it.
-- Any contiguous nonworking pause of at least five minutes resets both the eye and movement cadences before work resumes. The reset changes neither recorded work time nor the completed-break count.
-- Eye and movement reminders that fall within three minutes of each other are combined into one flow. The automatic combined flow lasts exactly 5 minutes 30 seconds: the 30-second eye flow followed by the five-minute movement flow.
+- Reminder cadence advances while desk presence is active, independently of whether focused work is running or paused. Pausing a work counter never silently resets a reminder.
+- Marking yourself away from the desk freezes both reminder clocks. Returning continues the outstanding cadence unless a reminder outcome explicitly resets or postpones it.
+- When eye and movement reminders coincide, one popup presents both choices in stacked cards. The user chooses which to do first and may skip either or both.
+- A movement reminder can be postponed for 10 minutes without claiming that movement occurred. Choosing **I moved during the break** records the movement outcome and schedules the next reminder at the normal configured interval.
+- Skipping dismisses the current activity without completion credit; completing an activity records a completed break.
 - Timer or daily-goal completion takes priority over a reminder.
-- Completing an entire automatic flow increments the completed-break count once, regardless of how many steps it contains.
-- Skipping or closing a break resets that reminder's cadence and resumes a previously running timer, but does not record a completed break.
 - Starting an exercise manually from the library opens only the selected activity and pauses the active timer; if the timer was already idle or paused, it stays that way afterward.
+- Every newly due reminder plays one locally generated, low-volume two-tone chime by default. Combined reminders play it once, and the setting is independent from the optional exercise-completion sound.
 
 ### Guided activity library
 
-Timee contains animated, source-linked guidance for eye rest and gentle desk-friendly movement. Each card shows the activity, suggested repetitions or duration, where it can be performed, and the institution used as its source. A manual library session remains a single selected exercise; automatic reminder rotation and bundling apply only to automatic flows.
+Timee contains animated, source-linked guidance for eye rest and gentle desk-friendly movement. Each card shows the activity, suggested repetitions or duration, where it can be performed, and the institution used as its source. A manual library session remains a single selected exercise; automatic rotation applies only to reminder flows.
 
-Animations can be reduced in Settings. Sound is disabled by default and can be enabled for the end of a guided activity.
+Animations can be reduced in Settings. The calm reminder chime is enabled by default and can be disabled separately; the exercise-completion sound remains optional and disabled by default.
 
 ### Daily work target
 
@@ -88,7 +98,7 @@ Animations can be reduced in Settings. Sound is disabled by default and can be e
 - Breaks and manually paused time never count toward the target.
 - The target card's **Reset** button asks for confirmation, then restarts only goal progress by moving its baseline to the current today-work total. The progress bar returns to zero and the full configured target becomes available again without deleting recorded work.
 - A confirmed goal-progress reset preserves the configured target duration, actual today-work and lifetime totals, stopwatch elapsed value, countdown duration and remaining value, reminder cadence, and completed-break count.
-- At the next local calendar day, Timee automatically resets the daily work total, goal baseline, and completed-break count. Lifetime work remains available internally.
+- The daily boundary defaults to **05:00 local time** rather than midnight and can be changed in Settings. At that boundary, Timee resets the daily work total, daily desk total, goal baseline, and completed-break count. Lifetime work remains available internally.
 
 ### Recurring weekly planner
 
@@ -107,15 +117,15 @@ Timee does not require an account, server, or internet connection for normal use
 
 Writes use a temporary file followed by an atomic replacement. If the original JSON is damaged or unreadable, Timee preserves it and writes new data to a recovery file rather than overwriting the damaged evidence. A lock file prevents two Timee processes from writing to the same data directory concurrently.
 
-Restored sessions never start unattended: a running or break state is restored as paused, and time spent while the application was closed is not counted. Persisted paused state includes a wall-clock timestamp. If the contiguous paused or offline period reaches five minutes, Timee safely resets both reminder cadences on restore; a shorter offline pause preserves the frozen cadence. Neither case adds work time or records a completed break.
+Restored sessions never start work or desk presence unattended: active and break states restore safely without crediting time spent while the application was closed. Persisted reminder cadence resumes from its saved value; it is never inferred from the length of a work pause or offline period.
 
 ## Health guidance and evidence boundaries
 
 Timee is a break reminder and activity guide. It is not medical advice, a vision treatment, a diagnostic tool, or a personalised exercise programme.
 
-The default eye-rest guidance is based on the American Optometric Association's practical 20-20-20 recommendation and the American Academy of Ophthalmology's guidance to blink and periodically look away from a screen. The default movement interval is a product choice based on the UK Health and Safety Executive's example of a 5–10 minute screen break after 50–60 minutes of continuous display work. The individual movement instructions are mapped to NHS and Newcastle Hospitals NHS guidance.
+The default eye-rest guidance is based on the American Optometric Association's practical 20-20-20 recommendation, AAO and OSHA guidance to blink and periodically look away, and Moorfields NHS guidance on briefly closing the eyes. The default movement interval is a product choice informed by the UK Health and Safety Executive's example of a 5–10 minute screen break after 50–60 minutes of continuous display work. Individual movement instructions are mapped to NHS and Newcastle Hospitals NHS guidance.
 
-The 10-second blink cue, alternating eye-step order, three-exercise rotation, bundling, screen-away remainder, and five-minute cadence-reset rule are Timee presentation and scheduling heuristics, not a source-validated clinical protocol. The sources support practical break and movement guidance; they do not prove that every activity works for every person or that the exact 20-20-20 numbers are optimal. Timee makes no claim to correct myopia, strengthen eye muscles, or improve vision through on-screen tracking.
+The 10-second supporting eye cue, prompt rotation, automatic sequencing, desk-time scheduling, coalescing, and 10-minute snooze are Timee presentation and scheduling heuristics, not a source-validated clinical protocol. The sources support practical breaks and gentle movement; they do not prove that every activity works for every person or that the exact 20-20-20 numbers are optimal. Timee deliberately excludes generic figure-eight, rapid gaze repetition, pencil-pushup, convergence, “eye yoga,” massage, and on-screen tracking drills. It makes no claim to correct myopia, strengthen eye muscles, or sharpen vision.
 
 See [the source and evidence notes](docs/health-sources.md) for the complete mapping, limitations, and links.
 
@@ -303,6 +313,8 @@ The internal Python package is currently named `mola`; this does not affect the 
 │   ├── health-sources.md          # source mapping and evidence limits
 │   └── screenshots-timee/         # current blue-theme screenshots
 ├── mola/
+│   ├── assets/
+│   │   └── reminder-chime.wav    # original local two-tone notification
 │   ├── animation.py               # vector timer and exercise rendering
 │   ├── app.py                     # main, mini, settings, and dialog windows
 │   ├── content.py                 # activities and source metadata
@@ -325,7 +337,7 @@ The internal Python package is currently named `mola`; this does not affect the 
 └── run.sh
 ```
 
-The `Engine` class accepts injected clock and date functions, allowing timer, suspend, daily-rollover, reminder-coalescing, and completion behavior to be tested without waiting in real time.
+The `Engine` class accepts injected monotonic and calendar clocks, allowing work time, desk time, suspend, configurable daily rollover, reminder coalescing, snoozing, and completion behavior to be tested without waiting in real time.
 
 ## Testing
 
@@ -346,11 +358,12 @@ The tests cover:
 - stopwatch and countdown boundaries;
 - work-only accounting, daily target boundaries, and baseline-only goal-progress resets;
 - simultaneous and near-simultaneous reminders;
-- completed, skipped, closed, and manually opened break flows;
-- short manual-pause cadence freezing and five-minute nonworking-pause resets;
-- persisted and offline paused-time reset behavior;
-- alternating automatic eye flows, rotating three-exercise movement bundles, and exact 5:00/5:30 flow durations;
-- system-suspend gaps and day rollover;
+- independently controlled work and desk-presence counters;
+- completed, snoozed, acknowledged, skipped, closed, and manually opened break flows;
+- work pauses that preserve desk-based reminder cadence;
+- persisted reminder state without inferred offline work or desk time;
+- varied automatic eye flows with no-click step transitions and one-exercise movement rotation;
+- system-suspend gaps and configurable 05:00-default day rollover;
 - save and restore behavior;
 - legacy Mola-to-Timee state migration;
 - mini-window controls sharing the main session;
@@ -366,9 +379,10 @@ Offscreen Qt tests cannot prove real compositor stacking behavior. On KDE Plasma
 - The dark blue palette maintains clear text and control contrast.
 - Important instructions use text as well as animation.
 - Reduced-motion mode stops nonessential exercise animation.
+- The calm two-tone reminder cue is enabled by default and has its own setting.
 - Completion sound is optional and disabled by default.
 - Exercise instructions are available without relying on color alone.
-- The mini window retains explicit start/pause and close controls at compact sizes.
+- The mini window retains explicit work, desk-presence, and close controls at compact sizes.
 
 Timee has not yet undergone a formal WCAG or assistive-technology conformance audit. Accessibility feedback and platform-specific testing are welcome once a contribution policy and license are established.
 
@@ -423,7 +437,9 @@ Check that the title is nonempty, the end is later than the start, and the inter
 The full annotated source list is maintained in [docs/health-sources.md](docs/health-sources.md). Primary institutional sources include:
 
 - [American Optometric Association — Computer vision syndrome and the 20-20-20 rule](https://www.aoa.org/healthy-eyes/eye-and-vision-conditions/computer-vision-syndrome/20-20-20-rule?sso=y)
-- [American Academy of Ophthalmology — Computers, digital devices, and eye strain](https://www.aao.org/eye-health/diseases/computer-usage)
+- [American Academy of Ophthalmology — Computers, digital devices, and eye strain](https://www.aao.org/eye-health/glasses-contacts/computer-usage)
+- [OSHA — Computer workstation monitor guidance](https://www.osha.gov/etools/computer-workstations/components/monitors)
+- [Moorfields NHS — Digital eye-strain relief](https://www.moorfields.nhs.uk/private/about-moorfields-private/blog-articles/10-steps-for-digital-eye-strain-relief)
 - [UK Health and Safety Executive — Work routine and breaks](https://www.hse.gov.uk/msd/dse/work-routine.htm)
 - [NHS — Strength exercises](https://www.nhs.uk/live-well/exercise/strength-exercises/)
 - [NHS — Sitting exercises](https://www.nhs.uk/live-well/exercise/sitting-exercises/)
